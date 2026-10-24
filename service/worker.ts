@@ -11,6 +11,7 @@ import {
 import {
   createAdapter,
   MockAdapter,
+  LiveAdapter,
   ServiceError,
   type MockFixture,
 } from "./adapters";
@@ -268,6 +269,13 @@ export async function handle(request: Request, env: Env): Promise<Response> {
       if (!row || await deleted(id)) return fail("not_found", "This session result has expired or does not exist.", 404);
       await sql.run("INSERT OR IGNORE INTO deleted_jobs(id) VALUES(?)", [id]);
       results.delete(id);
+      if (row.mode === "live" && env.YOUCAM_MODE === "live" && env.YOUCAM_API_KEY && row.provider_task_id) {
+        try {
+          await new LiveAdapter(env.YOUCAM_API_KEY).deleteTask(row.provider_task_id);
+        } catch {
+          // Provider cleanup is best-effort; local deletion already completed.
+        }
+      }
       return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
     }
     if (request.method === "GET" && match) {

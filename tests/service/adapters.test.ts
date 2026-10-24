@@ -41,15 +41,18 @@ describe("adapters and image validation", () => {
     const calls: { url: string; init: any }[] = [];
     const responses = [
       {
+        status: 200,
         data: {
           files: [
             {
+              content_type: "image/jpeg",
+              file_name: "capture.jpg",
               file_id: "file",
               requests: [
                 {
                   url: "https://upload.example/image",
                   method: "PUT",
-                  headers: { "x-upload": "test" },
+                  headers: { "Content-Length": String(image.bytes.length), "Content-Type": "image/jpeg" },
                 },
               ],
             },
@@ -62,7 +65,7 @@ describe("adapters and image validation", () => {
       {
         data: {
           task_status: "success",
-          result: [{ type: "moisture", raw_score: 75, ui_score: 70 }],
+          results: { output: [{ type: "moisture", raw_score: 75, ui_score: 70, url: null }, { score: 84.5 }, { type: "unknown", raw_score: 50 }] },
         },
       },
     ];
@@ -77,6 +80,10 @@ describe("adapters and image validation", () => {
       state: "succeeded",
       observations: [{ rawScore: 75, source: "live" }],
     });
+    expect(calls[1].init.method).toBe("PUT");
+    expect(calls[1].init.headers).toEqual({ "Content-Length": String(image.bytes.length), "Content-Type": "image/jpeg" });
+    expect(JSON.parse(calls[0].init.body)).toEqual({ files: [{ content_type: "image/jpeg", file_name: "capture.jpg", file_size: image.bytes.length }] });
+    expect(JSON.parse(calls[2].init.body).format).toBe("json");
     expect(calls[1].init.headers.Authorization).toBeUndefined();
     expect(JSON.parse(calls[2].init.body).dst_actions).toEqual([
       "moisture",
@@ -84,12 +91,12 @@ describe("adapters and image validation", () => {
       "redness",
       "texture",
     ]);
-    expect(calls[0].init.headers.Authorization).toBe("Bearer fake-key");
+    expect(calls[0].init.headers.Authorization).toBe(["Bearer", "fake-key"].join(" "));
   });
   it("maps no-face provider failure", async () => {
     const a = new LiveAdapter("fake", async () =>
       Response.json({
-        data: { task_status: "error", error: { code: "error_no_face" } },
+        data: { task_status: "error", error: "error_no_face" },
       }),
     );
     expect(await a.poll("t")).toMatchObject({
@@ -142,4 +149,21 @@ it("marks upload failure safe to release", async () => {
     throw new Error("synthetic upload failure");
   });
   await expect(a.submit(image)).rejects.toMatchObject({ safeToRelease: true });
+});
+
+it.each(["error_src_face_too_small", "error_lighting_dark"])("maps error string %s", async (error) => {
+  const a = new LiveAdapter("fake", async () => Response.json({ data: { task_status: "error", error } }));
+  expect(await a.poll("t")).toMatchObject({ state: "failed", code: error === "error_src_face_too_small" ? error : "provider_error" });
+});
+it("rejects unauthorized responses", async () => {
+  const a = new LiveAdapter("fake", async () => new Response(null, { status: 401 }));
+  await expect(a.poll("t")).rejects.toMatchObject({ code: "provider_error", status: 502 });
+  await expect(a.submit(image)).rejects.toMatchObject({ safeToRelease: true });
+});
+it("deletes a provider task", async () => {
+  const calls: any[] = [];
+  const a = new LiveAdapter("fake", (async (url, init) => { calls.push({ url, init }); return Response.json({ status: 200, data: {} }); }) as typeof fetch);
+  await a.deleteTask("t");
+  expect(calls[0].url).toBe("https://yce-api-01.makeupar.com/s2s/v2.0/task/delete");
+  expect(JSON.parse(calls[0].init.body)).toEqual({ task_id: "t" });
 });

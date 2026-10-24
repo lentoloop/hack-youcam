@@ -5,7 +5,8 @@
   "scripts": {
     "test": "vitest run",
     "test:e2e": "vitest run --config ../tests/e2e/vitest.config.ts",
-    "dev": "node dev.mjs"
+    "dev": "node dev.mjs",
+    "smoke:live": "node scripts/smoke-live.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250101.0",

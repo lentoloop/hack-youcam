@@ -89,7 +89,7 @@ export interface CreateAnalysisResponse {
   deduplicated: boolean;
 }
 
-/** Normalized provider output for one concern. Scores pass through unchanged (1-100); direction unconfirmed, no severity thresholds invented. */
+/** Normalized provider output for one concern. Scores pass through unchanged (1-100); higher is healthier. Prefer rawScore for logic; uiScore is the calibrated provider display score. No severity thresholds invented. */
 export interface Observation {
   concern: Concern;
   rawScore: number;

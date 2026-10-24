@@ -1,0 +1,54 @@
+{
+  "status": 200,
+  "data": {
+    "error": null,
+    "results": {
+      "output": [
+        {
+          "ui_score": 80,
+          "mask_urls": "[REDACTED]",
+          "raw_score": 78.75497341156006,
+          "type": "texture",
+          "url": "[REDACTED]"
+        },
+        {
+          "ui_score": 76,
+          "mask_urls": "[REDACTED]",
+          "raw_score": 69.2258529663086,
+          "type": "redness",
+          "url": "[REDACTED]"
+        },
+        {
+          "ui_score": 69,
+          "mask_urls": "[REDACTED]",
+          "raw_score": 53.627201080322266,
+          "type": "oiliness",
+          "url": "[REDACTED]"
+        },
+        {
+          "ui_score": 68,
+          "mask_urls": "[REDACTED]",
+          "raw_score": 45.06698548793793,
+          "type": "moisture",
+          "url": "[REDACTED]"
+        },
+        {
+          "score": 73.25,
+          "type": "all",
+          "url": "[REDACTED]"
+        },
+        {
+          "score": 51,
+          "type": "skin_age",
+          "url": "[REDACTED]"
+        },
+        {
+          "mask_urls": "[REDACTED]",
+          "type": "resize_image",
+          "url": "[REDACTED]"
+        }
+      ]
+    },
+    "task_status": "success"
+  }
+}

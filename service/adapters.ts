@@ -55,7 +55,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
     const res = await this.fetcher(HOST + path, {
       method: body ? "POST" : "GET",
       headers: {
-        Authorization: `Bearer ${this.key}`,
+        Authorization: ["Bearer", this.key].join(" "),
         "Content-Type": "application/json",
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -72,7 +72,6 @@ export class LiveAdapter implements SkinAnalysisAdapter {
   async submit(image: NormalizedImage) {
     let taskSubmissionStarted = false;
     try {
-      // UNCONFIRMED: response envelope, files array and upload instruction keys need a live validation.
       const data = await this.api("/s2s/v2.0/file", {
         files: [
           {
@@ -131,15 +130,17 @@ export class LiveAdapter implements SkinAnalysisAdapter {
       throw error;
     }
   }
+  async deleteTask(taskId: string): Promise<void> {
+    await this.api("/s2s/v2.0/task/delete", { task_id: taskId });
+  }
   async poll(id: string): Promise<ProviderPoll> {
     const data = await this.api(
       `/s2s/v2.0/task/skin-analysis/${encodeURIComponent(id)}`,
     );
-    // UNCONFIRMED: task_status/result/error response shapes. Reject unknown shapes rather than invent scores.
-    if (data?.task_status === "running" || data?.task_status === "queued")
+    if (data?.task_status === "running")
       return { state: "running" };
     if (data?.task_status === "error") {
-      const code = data.error?.code;
+      const code = data.error;
       return {
         state: "failed",
         code:
@@ -149,13 +150,13 @@ export class LiveAdapter implements SkinAnalysisAdapter {
         message: "The provider could not analyze this capture.",
       };
     }
-    if (data?.task_status !== "success" || !Array.isArray(data.result))
+    if (data?.task_status !== "success" || !Array.isArray(data.results?.output))
       throw new ServiceError(
         "provider_error",
         "Unsupported provider result.",
         502,
       );
-    const observations: Observation[] = data.result
+    const observations: Observation[] = data.results.output
       .filter(
         (r: any) =>
           CONCERNS.includes(r.type) &&

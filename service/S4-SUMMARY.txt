@@ -1,0 +1,16 @@
+Changed LiveAdapter to results.output, running/success/error, string errors, and provider task deletion.
+Uploads use provider method/headers; pre-task failures still safely release reservations.
+Local live DELETE attempts provider cleanup; failure never blocks local removal.
+Confirmed higher-is-healthier/raw-vs-display score comments and provider retention documentation.
+decide() behavior unchanged; no severity thresholds introduced.
+Added guarded smoke:live with external runtime credentials/image, pagination, budget/run guards and redaction.
+Real calls: GET /s2s/v2.0/credit/feature-cost x7, all HTTP 200.
+Two authorized attempts ended before upload/task creation; zero other provider calls.
+units_used=0; remaining=unknown (balance never requested).
+First attempt: SD SKU absent on first page; second: live SKU label differed from docs.
+Live label: AI Skin Analysis V2.0 SD (1-4 concerns), amount=9; matcher corrected offline.
+Live result vs mock: UNVERIFIED; no live analysis result or live-sample-result.json produced.
+Checks: contracts/service/web typechecks pass; service/shared 59, e2e 3, web 14 tests pass; web build passes.
+Offline SKU checks: 5 pass. Secret/token/URL diff scan and git diff --check pass; no add/commit.
+Open: two-run cap exhausted; actual live analysis/cleanup unverified; consent-version retention wording stale.
+Kai operator run 15:32 Taipei: smoke:live SUCCESS, 9 units (1040->1031), schema matched; extra output types all/skin_age/resize_image ignored; task deleted.

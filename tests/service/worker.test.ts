@@ -205,3 +205,22 @@ it('does not restore observations when a poll finishes after DELETE', async () =
     expect((await handle(new Request(url), e)).status).toBe(404);
   } finally { poll.mockRestore(); }
 });
+it.each([false, true])("locally deletes live jobs when provider cleanup fails=%s", async (fails) => {
+  const { LiveAdapter } = await import("../../service/adapters");
+  const submit = vi.spyOn(LiveAdapter.prototype, "submit").mockResolvedValue({ providerTaskId: "synthetic-task" });
+  const cleanup = vi.spyOn(LiveAdapter.prototype, "deleteTask").mockImplementation(async () => {
+    if (fails) throw new Error("synthetic provider failure");
+  });
+  try {
+    const e = env();
+    e.YOUCAM_MODE = "live";
+    e.YOUCAM_API_KEY = "synthetic-key";
+    const response = await handle(request(), e);
+    expect(response.status).toBe(202);
+    const created: any = await response.json();
+    const url = "https://local/api/analyses/" + created.job.id;
+    expect((await handle(new Request(url, { method: "DELETE" }), e)).status).toBe(204);
+    expect(cleanup).toHaveBeenCalledWith("synthetic-task");
+    expect((await handle(new Request(url), e)).status).toBe(404);
+  } finally { submit.mockRestore(); cleanup.mockRestore(); }
+});

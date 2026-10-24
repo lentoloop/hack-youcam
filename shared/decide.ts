@@ -14,7 +14,8 @@ export const decide: DecideFn = (observations, goal, ownedTags) => {
       ],
       nextStep: "See a dermatologist.",
     };
-  // Score direction is UNCONFIRMED. Presence of valid evidence never implies severity.
+  // Higher raw/ui scores indicate healthier skin; raw scores are preferred for logic.
+  // Presence of valid evidence never implies severity; no thresholds are used.
   const evidence = observations.filter(
     (o) =>
       o.concern === goal.concern &&
