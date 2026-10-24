@@ -1,5 +1,5 @@
 /** FROZEN CONTRACT (Kai, 2026-10-24). Mode switch: YOUCAM_MODE=mock|live picks the adapter; same interface. */
-import type { AnalysisErrorCode, Observation, YoucamMode } from "./analysis";
+import type { AnalysisErrorCode, MaskSet, Observation, YoucamMode, ZoneLabel } from "./analysis";
 
 export interface NormalizedImage {
   bytes: Uint8Array;
@@ -12,12 +12,14 @@ export interface NormalizedImage {
 
 export type ProviderPoll =
   | { state: "running" }
-  | { state: "succeeded"; observations: Observation[] }
+  | { state: "succeeded"; observations: Observation[]; zoneLabels: ZoneLabel[]; masks: MaskSet }
   | { state: "failed"; code: AnalysisErrorCode; message: string };
 
 /**
  * Live flow: POST /s2s/v2.0/file -> upload bytes -> POST /s2s/v2.0/task/skin-analysis
  * (dst_actions = CONCERNS, format json) -> GET /s2s/v2.0/task/skin-analysis/{task_id}.
+ * On success the adapter downloads the acne, redness and skin_type t_zone/u_zone mask PNGs itself and returns them as
+ * data URLs (MaskSet); provider URLs are never returned, logged or stored.
  * Mock flow: deterministic fixtures (success, no_face, small_face, timeout).
  */
 export interface SkinAnalysisAdapter {

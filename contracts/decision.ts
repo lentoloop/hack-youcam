@@ -1,4 +1,4 @@
-/** FROZEN CONTRACT (Kai, 2026-10-24). Do not edit; changes go through Kai. */
+/** LEGACY (v1 purchase decision). Replaced by contracts/log.ts (BuildLog). Kai deletes this after S1/S2 merge; do not use in new code. */
 import type { Concern, Observation } from "./analysis";
 
 /** Cosmetic-purpose tags on generic product cards (no brands, no real packaging). */

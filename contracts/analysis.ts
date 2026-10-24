@@ -1,11 +1,14 @@
 /**
  * FROZEN CONTRACT (Kai, 2026-10-24). Sessions must not edit files under contracts/.
- * Changes go through Kai. Source: /workspace/eng/arch/youcam.md v0 (approved by wu 10/24 11:27).
+ * Changes go through Kai. v2 source: /workspace/eng/arch/youcam-breakoutlog-v1.md (approved by wu 10/24 16:53 Taipei).
  */
 
-/** The four SD skin-analysis actions we request (4 SD actions = 9 units per success). */
-export const CONCERNS = ["moisture", "oiliness", "redness", "texture"] as const;
+/** The four SD skin-analysis actions we request as dst_actions (4 SD actions = 9 units per success; confirmed live 10/24). */
+export const CONCERNS = ["acne", "redness", "texture", "skin_type"] as const;
 export type Concern = (typeof CONCERNS)[number];
+/** Concerns the provider scores (ui_score/raw_score). skin_type returns zone labels + masks only, no score. */
+export const SCORED_CONCERNS = ["acne", "redness", "texture"] as const;
+export type ScoredConcern = (typeof SCORED_CONCERNS)[number];
 
 /** Which adapter served the request. Switched server-side by YOUCAM_MODE. */
 export type YoucamMode = "mock" | "live";
@@ -46,7 +49,8 @@ export const IMAGE_LIMITS = {
   maxBytes: 5 * 1024 * 1024,
 } as const;
 
-export const CONSENT_TEXT_VERSION = "2026-10-24.v1" as const;
+/** v2: Breakout Log consent; provider retains uploaded files up to 30 days, result/mask URLs expire after 2 hours. */
+export const CONSENT_TEXT_VERSION = "2026-10-24.v2" as const;
 
 export interface ConsentRecord {
   granted: true;
@@ -91,16 +95,34 @@ export interface CreateAnalysisResponse {
 
 /** Normalized provider output for one concern. Scores pass through unchanged (1-100); higher is healthier. Prefer rawScore for logic; uiScore is the calibrated provider display score. No severity thresholds invented. */
 export interface Observation {
-  concern: Concern;
+  concern: ScoredConcern;
   rawScore: number;
   uiScore?: number;
   source: ObservationSource;
 }
 
+/** skin_type output: one label per provider region, verbatim (e.g. t_zone "Oily", u_zone "Dry & Sensitive"). */
+export type ProviderRegion = "whole" | "t_zone" | "u_zone";
+export interface ZoneLabel {
+  region: ProviderRegion;
+  label: string;
+  source: ObservationSource;
+}
+
+/** Masks forwarded to the same session for in-browser region maths. Provider mask URLs (2 h validity) never leave the
+ * service; masks are sent as `data:image/png;base64,...`, held only in the 30-min in-memory result, never written to D1,
+ * logs or the downloaded log file. 600x800 RGBA PNG in the provider's image pixel space. */
+export type MaskKind = "acne" | "redness" | "t_zone" | "u_zone";
+export type MaskSet = Partial<Record<MaskKind, string>>;
+
 /** GET /api/analyses/:id — 200: GetAnalysisResponse (observations empty until succeeded). */
 export interface GetAnalysisResponse {
   job: AnalysisJob;
   observations: Observation[];
+  /** skin_type labels; empty until succeeded or when not returned. */
+  zoneLabels: ZoneLabel[];
+  /** Present only for succeeded live/mock jobs while the result is held; absent after expiry/delete. */
+  masks?: MaskSet;
 }
 
 export const API_ROUTES = {
