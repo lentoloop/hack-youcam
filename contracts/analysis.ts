@@ -49,8 +49,15 @@ export const IMAGE_LIMITS = {
   maxBytes: 5 * 1024 * 1024,
 } as const;
 
-/** v2: Breakout Log consent; provider retains uploaded files up to 30 days, result/mask URLs expire after 2 hours. */
-export const CONSENT_TEXT_VERSION = "2026-10-24.v2" as const;
+/** v3 (R1 review blocker 4): one shared consent text for UI and docs/PRIVACY.md. UI must render CONSENT_TEXT verbatim. */
+export const CONSENT_TEXT_VERSION = "2026-10-24.v3" as const;
+export const CONSENT_TEXT =
+  "I have permission to upload this face to Perfect Corp. for cosmetic analysis. " +
+  "Perfect Corp. keeps uploaded files for up to 30 days; result and mask links expire after 2 hours. " +
+  "This app holds the scores and the YouCam masks in memory for at most 30 minutes to estimate zone counts in my browser, " +
+  "and tries to delete the analysis (here and at Perfect Corp.) when I press Delete or leave the page; deletion is best effort and the app shows if it failed. " +
+  "A downloaded log contains scores, skin-type labels, the app's zone estimates, and the dates, product categories, notes and symptoms I type, but no photo, masks or links. " +
+  "This is not medical advice.";
 
 export interface ConsentRecord {
   granted: true;
@@ -82,8 +89,7 @@ export interface AnalysisJob {
   source: ObservationSource;
   createdAt: string;
   updatedAt: string;
-  /** Provider task id, kept after timeout so polling can resume. */
-  providerTaskId?: string;
+  /** v3: provider task ids are server-only (R1 finding 10); never serialized to the browser. */
   error?: ApiError["error"];
 }
 
@@ -133,5 +139,21 @@ export const API_ROUTES = {
 /** Suggested client poll interval and UI timeout. */
 export const POLLING = { intervalMs: 10_000, uiTimeoutMs: 120_000 } as const;
 
-/** DELETE /api/analyses/:id — 204, no body; unknown/deleted id: ApiError 404. */
+/** Provider-side cleanup status, reported separately from local deletion (R1 blocker 1). */
+export type ProviderCleanup =
+  | "deleted" // provider task/delete returned success
+  | "pending" // not yet attempted or will be retried (scheduled sweep or next DELETE)
+  | "failed" // last attempt failed; retry possible via DELETE again or the scheduled sweep
+  | "not_applicable" // mock mode or no provider task was ever created
+  | "unknown_task"; // task creation outcome was ambiguous; no task id to delete (provider 30-day retention applies)
+
+/**
+ * DELETE /api/analyses/:id — 200 DeleteAnalysisResponse. Local access is revoked immediately (later GET -> 404).
+ * Idempotent: repeating DELETE on an already-deleted job returns 200 with the current cleanup status and retries
+ * provider cleanup when it is "pending" or "failed". Never-existing id: ApiError 404.
+ */
+export interface DeleteAnalysisResponse {
+  local: "deleted";
+  provider: ProviderCleanup;
+}
 export const DELETE_ANALYSIS_ROUTE = API_ROUTES.getAnalysis;

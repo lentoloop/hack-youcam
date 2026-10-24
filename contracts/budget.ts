@@ -41,5 +41,11 @@ export interface BudgetGuard {
   commit(reservationId: string): Promise<void>;
   /** Provider failed (units only charged on success): release reservation. Not called on timeout. */
   release(reservationId: string): Promise<void>;
+  /**
+   * v3 (R1 blocker 3): job deleted/expired/ambiguous before a terminal provider state. Frees the concurrency slot
+   * immediately but conservatively keeps the units held (counted as reserved/spent liability, never returned to a
+   * pool) until a later confirmed outcome commits or releases them. Idempotent.
+   */
+  abandon(reservationId: string): Promise<void>;
   status(): Promise<BudgetStatus>;
 }
