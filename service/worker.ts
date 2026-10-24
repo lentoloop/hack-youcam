@@ -51,6 +51,7 @@ function fail(code: ApiError["error"]["code"], message: string, status = 400) {
 interface Row {
   cleanup_status: ProviderCleanup;
   submit_started: number;
+  submission_generation: number;
   id: string;
   state: AnalysisJob["state"];
   mode: AnalysisJob["mode"];
@@ -96,6 +97,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
                   query.replaceAll("reservations", "mock_reservations"),
                   args,
                 ),
+              batch: statements => sql.batch(statements.map(s => ({...s, sql:s.sql.replaceAll("reservations", "mock_reservations")}))),
               run: (query, args) =>
                 sql.run(
                   query.replaceAll("reservations", "mock_reservations"),
@@ -103,6 +105,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
                 ),
             }
           : sql,
+        () => Date.now(), env.YOUCAM_MODE === "mock" ? "mock" : "live",
       );
     if (request.method === "POST" && url.pathname === "/api/analyses") {
       const length = Number(request.headers.get("content-length"));
@@ -229,31 +232,31 @@ export async function handle(request: Request, env: Env): Promise<Response> {
           );
         return json({ job: job(row), deduplicated: true }, 202);
       }
-      const id = reservation.reservationId,
-        now = new Date().toISOString();
-      await sql.run(
-        "INSERT INTO jobs(id,state,mode,created_at,updated_at,session_id) VALUES(?,?,?,?,?,?)",
-        [id, "queued", env.YOUCAM_MODE, now, now, meta.sessionId],
-      );
+      const id = reservation.reservationId;
       try {
-        await sql.run("UPDATE jobs SET submit_started=1 WHERE id=?", [id]);
+        await sql.run("UPDATE jobs SET submit_started=1,submission_generation=submission_generation+1 WHERE id=?", [id]);
         const task = await adapter.submit(image);
         await sql.run(
           "UPDATE jobs SET cleanup_status='pending',state='running',provider_task_id=?,updated_at=? WHERE id=?",
           [task.providerTaskId, new Date().toISOString(), id],
         );
+        // Recording the handle precedes checking durable cancellation intent.
+        if ((await sql.all("SELECT id FROM deleted_jobs WHERE id=?", [id])).length) {
+          await budget.abandon(id);
+          await cleanup((await sql.all<Row>("SELECT * FROM jobs WHERE id=?", [id]))[0], env, sql);
+        }
       } catch (error) {
         if (error instanceof ServiceError && error.safeToRelease) {
           await budget.release(id);
           await sql.run(
-            "UPDATE jobs SET cleanup_status='not_applicable',state='failed',error_code='provider_error',updated_at=? WHERE id=?",
+            "UPDATE jobs SET cleanup_status='not_applicable',state='failed',error_code='provider_error',updated_at=? WHERE id=? AND cleanup_status!='deleted' AND provider_task_id IS NULL",
             [new Date().toISOString(), id],
           );
         } else {
           // Ambiguous creation keeps unit liability but frees execution capacity.
           await budget.abandon(id);
           await sql.run(
-            "UPDATE jobs SET cleanup_status='unknown_task',error_code='timeout',updated_at=? WHERE id=?",
+            "UPDATE jobs SET cleanup_status=CASE WHEN provider_task_id IS NULL THEN 'unknown_task' ELSE cleanup_status END,error_code='timeout',updated_at=? WHERE id=? AND cleanup_status!='deleted'",
             [new Date().toISOString(), id],
           );
         }
@@ -276,7 +279,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
       if (!row) return fail("not_found", "This session result does not exist.", 404);
       await sql.run("INSERT OR IGNORE INTO deleted_jobs(id) VALUES(?)", [id]);
       results.delete(id);
-      await budget.abandon(id);
+      await sql.run(`UPDATE ${row.mode === 'mock' ? 'mock_reservations' : 'reservations'} SET status='abandoned' WHERE id=? AND status='reserved'`, [id]);
       return json({ local: "deleted", provider: await cleanup(row, env, sql) });
     }
     if (request.method === "GET" && match) {
@@ -372,30 +375,41 @@ export async function handle(request: Request, env: Env): Promise<Response> {
     return fail("provider_error", "The request could not be completed.", 500);
   }
 }
-async function cleanup(row: Row, env: Env, sql: D1Executor, fetcher: typeof fetch = fetch.bind(globalThis)): Promise<ProviderCleanup> {
-  if (row.cleanup_status === 'deleted') return 'deleted';
-  let status: ProviderCleanup = row.mode === 'mock' ? 'not_applicable' :
-    row.provider_task_id ? 'pending' : row.cleanup_status === 'not_applicable' || !row.submit_started ? 'not_applicable' : 'unknown_task';
-  if (status === 'pending') {
-    await sql.run("UPDATE jobs SET cleanup_attempts=cleanup_attempts+1,cleanup_last_attempt_at=? WHERE id=?", [new Date().toISOString(), row.id]);
-    try {
-      if (!env.YOUCAM_API_KEY) throw Error('Cleanup credentials unavailable');
-      await new LiveAdapter(env.YOUCAM_API_KEY, fetcher).deleteTask(row.provider_task_id!);
-      status = 'deleted';
-    } catch { status = 'failed'; }
+export async function cleanup(row: Row, env: Env, sql: D1Executor, fetcher: typeof fetch = fetch.bind(globalThis)): Promise<ProviderCleanup> {
+  // At most two snapshots: bounded retries also bound scheduled invocation cost.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (row.cleanup_status === 'deleted') return 'deleted';
+    let status: ProviderCleanup = row.mode === 'mock' ? 'not_applicable' :
+      row.provider_task_id ? 'pending' : row.cleanup_status === 'not_applicable' || !row.submit_started ? 'not_applicable' : 'unknown_task';
+    if (status === 'pending') {
+      await sql.run("UPDATE jobs SET cleanup_attempts=cleanup_attempts+1,cleanup_last_attempt_at=? WHERE id=? AND provider_task_id IS ? AND submission_generation=? AND cleanup_status!='deleted'", [new Date().toISOString(), row.id, row.provider_task_id, row.submission_generation]);
+      try {
+        if (!env.YOUCAM_API_KEY) throw Error('Cleanup credentials unavailable');
+        await new LiveAdapter(env.YOUCAM_API_KEY, fetcher).deleteTask(row.provider_task_id!);
+        status = 'deleted';
+      } catch { status = 'failed'; }
+    }
+    const changed = await sql.run("UPDATE jobs SET cleanup_status=?,provider_task_id=CASE WHEN ? IN ('deleted','not_applicable') THEN NULL ELSE provider_task_id END WHERE id=? AND provider_task_id IS ? AND submission_generation=? AND submit_started=? AND cleanup_status!='deleted'", [status, status, row.id, row.provider_task_id, row.submission_generation, row.submit_started]);
+    if (changed) return status;
+    row = (await sql.all<Row>("SELECT * FROM jobs WHERE id=?", [row.id]))[0];
+    if (!row) return 'unknown_task';
   }
-  await sql.run("UPDATE jobs SET cleanup_status=?,provider_task_id=CASE WHEN ? IN ('deleted','not_applicable') THEN NULL ELSE provider_task_id END WHERE id=?", [status, status, row.id]);
-  return status;
+  return row.cleanup_status;
 }
 export async function scheduled(_event: unknown, env: Env, _ctx?: unknown, fetcher: typeof fetch = fetch.bind(globalThis)) {
   const sql = new D1Executor(env.DB);
+  // Uncertain units remain held; only execution slots are reclaimed.
+  for (const table of ['reservations', 'mock_reservations'])
+    await sql.run(`UPDATE ${table} SET status='abandoned' WHERE status='reserved' AND created_at<=? AND NOT EXISTS(SELECT 1 FROM jobs WHERE jobs.id=${table}.id)`, [Date.now()-1800000]);
   const rows = await sql.all<Row>(`SELECT * FROM jobs WHERE (created_at<=? OR id IN (SELECT id FROM deleted_jobs))
-    AND cleanup_status NOT IN ('deleted','not_applicable') AND (cleanup_status!='unknown_task' OR provider_task_id IS NOT NULL) ORDER BY cleanup_last_attempt_at,created_at LIMIT 20`, [new Date(Date.now()-1800000).toISOString()]);
+    AND cleanup_status NOT IN ('deleted','not_applicable') AND (cleanup_status!='unknown_task' OR provider_task_id IS NOT NULL) ORDER BY cleanup_last_attempt_at,created_at LIMIT 4`, [new Date(Date.now()-1800000).toISOString()]);
   for (const row of rows) {
-    await sql.run("INSERT OR IGNORE INTO deleted_jobs(id) VALUES(?)", [row.id]);
-    results.delete(row.id);
     const table = row.mode === 'mock' ? 'mock_reservations' : 'reservations';
-    await sql.run(`UPDATE ${table} SET status='abandoned' WHERE id=? AND status='reserved'`, [row.id]);
+    await sql.batch([
+      {sql: "INSERT OR IGNORE INTO deleted_jobs(id) VALUES(?)", args: [row.id]},
+      {sql: `UPDATE ${table} SET status='abandoned' WHERE id=? AND status='reserved'`, args: [row.id]},
+    ]);
+    results.delete(row.id);
     await cleanup(row, env, sql, fetcher);
   }
 }

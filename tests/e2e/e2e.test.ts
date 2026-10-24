@@ -20,7 +20,7 @@ beforeAll(async () => {
   const bundle = await build({ entryPoints: ['worker.ts'], bundle: true, write: false, format: 'esm', platform: 'browser' });
   mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-05-03', d1Databases: ['DB'], bindings: { YOUCAM_MODE: 'mock', IP_HASH_SECRET: 'synthetic-local-test-salt' }, outboundService: () => { throw new Error('External network forbidden'); } });
   const db = await mf.getD1Database('DB');
-  for (const name of ['0001.sql', '0002.sql', '0003.sql']) {
+  for (const name of ['0001.sql', '0002.sql', '0003.sql', '0004.sql']) {
     const sql = readFileSync(new URL(`../../service/migrations/${name}`, import.meta.url), 'utf8');
     for (const statement of sql.replace(/--[^\n]*/g, '').split(';').filter(s => s.trim())) await db.prepare(statement).run();
   }
@@ -109,7 +109,7 @@ it.each([false, true])('real worker attempts provider task/delete; failure=%s st
   } });
   try {
     const db = await provider.getD1Database('DB');
-    for (const name of ['0001.sql', '0002.sql', '0003.sql']) {
+    for (const name of ['0001.sql', '0002.sql', '0003.sql', '0004.sql']) {
       const sql = readFileSync(new URL(`../../service/migrations/${name}`, import.meta.url), 'utf8');
       for (const statement of sql.replace(/--[^\n]*/g, '').split(';').filter(s => s.trim())) await db.prepare(statement).run();
     }

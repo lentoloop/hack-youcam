@@ -121,3 +121,22 @@ for (const kind of ["memory", "sqlite"]) {
     });
   });
 }
+
+it('memory orphan reconciliation frees slots while retaining uncertain liability', async()=>{
+ let now=0; const g=new MemoryBudgetGuard(()=>now);
+ for(const id of ['a','b']) await g.reserve({pool:'public',ipHash:id,sessionId:id,imageSha256:id,units:9});
+ now=1800001;
+ await g.reconcileOrphans(new Set());
+ expect(await g.status()).toMatchObject({reservedUnits:18,remainingByPool:{judge:450}});
+ expect((await g.reserve({pool:'judge',ipHash:'judge',sessionId:'judge',imageSha256:'judge',units:9})).ok).toBe(true);
+});
+it('reservation and job batch roll back together on insertion failure',async()=>{
+ const {db,sql}=database();
+ db.exec("CREATE TRIGGER fail_job BEFORE INSERT ON jobs BEGIN SELECT RAISE(ABORT,'synthetic failure'); END");
+ const guard=new D1BudgetGuard(sql,()=>Date.now(),'live');
+ await expect(guard.reserve(req(1))).rejects.toThrow('synthetic failure');
+ expect(db.prepare('SELECT COUNT(*) n FROM reservations').get()).toEqual({n:0});
+ db.exec('DROP TRIGGER fail_job');
+ const result=await guard.reserve(req(1)); expect(result.ok).toBe(true);
+ expect(db.prepare('SELECT COUNT(*) n FROM jobs').get()).toEqual({n:1});
+});

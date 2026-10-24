@@ -246,7 +246,10 @@ export function createAdapter(
       "Live analysis is unavailable.",
       503,
     );
-  return new LiveAdapter(env.YOUCAM_API_KEY, fetcher, (env as AdapterEnv & { YOUCAM_STORAGE_HOST_SUFFIXES?: string }).YOUCAM_STORAGE_HOST_SUFFIXES);
+  const suffixes = (env as AdapterEnv & { YOUCAM_STORAGE_HOST_SUFFIXES?: string }).YOUCAM_STORAGE_HOST_SUFFIXES;
+  if (!suffixes?.split(',').some(s => s.trim()))
+    throw new ServiceError("live_unavailable", "Live storage host allowlist is not configured (YOUCAM_STORAGE_HOST_SUFFIXES).", 503);
+  return new LiveAdapter(env.YOUCAM_API_KEY, fetcher, suffixes);
 }
 
 export function validStorageUrl(url: URL, suffixes = ""): boolean {

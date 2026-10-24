@@ -16,7 +16,7 @@ async function log(endpoint, status, units = 0, before = balance, note = "") {
 async function wrapped(input, init = {}) {
   const url = new URL(String(input));
   const provider = url.origin === host;
-  if (!provider) console.log("storage-host=" + url.hostname);
+  if (!provider) console.log((init.method && init.method !== "GET" ? "upload-host=" : "mask-host=") + url.hostname);
   const path = provider ? url.pathname : "mask-or-upload";
   const method = init.method ?? "GET";
   const endpoint = `${method} ${path.startsWith(taskPath + "/") ? taskPath + "/[task_id]" : path}`;
@@ -76,7 +76,8 @@ async function main() {
     const bytes = new Uint8Array(await readFile(face));
     const compiled = await build({ entryPoints: [new URL("../adapters.ts", import.meta.url).pathname], bundle: true, write: false, platform: "node", format: "esm" });
     const { LiveAdapter } = await import("data:text/javascript;base64," + Buffer.from(compiled.outputFiles[0].text).toString("base64"));
-    adapter = new LiveAdapter(process.env.YOUCAM_API_KEY, wrapped);
+    if (process.env.SMOKE_LEARN_HOSTS !== "1" && !process.env.YOUCAM_STORAGE_HOST_SUFFIXES?.split(',').some(s => s.trim())) throw Error("Storage allowlist required");
+    adapter = new LiveAdapter(process.env.YOUCAM_API_KEY, wrapped, process.env.SMOKE_LEARN_HOSTS === "1" ? "" : process.env.YOUCAM_STORAGE_HOST_SUFFIXES);
     taskId = (await adapter.submit({ bytes, contentType: "image/jpeg", width: 600, height: 800, sha256: "runtime-only" })).providerTaskId;
     const deadline = Date.now() + 180000;
     while (Date.now() < deadline) {

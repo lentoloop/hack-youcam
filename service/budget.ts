@@ -9,9 +9,13 @@ import {
 export interface SqlExecutor {
   all<T>(sql: string, args?: unknown[]): Promise<T[]>;
   run(sql: string, args?: unknown[]): Promise<number>;
+  batch?(statements: {sql: string; args: unknown[]}[]): Promise<void>;
 }
 export class D1Executor implements SqlExecutor {
   constructor(private db: D1Database) {}
+  async batch(statements: {sql: string; args: unknown[]}[]) {
+    await this.db.batch(statements.map(s => this.db.prepare(s.sql).bind(...s.args)));
+  }
   async all<T>(sql: string, args: unknown[] = []): Promise<T[]> {
     return (
       await this.db
@@ -39,6 +43,7 @@ export class D1BudgetGuard implements BudgetGuard {
   constructor(
     private sql: SqlExecutor,
     private now = () => Date.now(),
+    private jobMode?: "live" | "mock",
   ) {}
   async reserve(r: ReservationRequest): Promise<ReservationResult> {
     if (r.units !== BUDGET.unitsPerSdRun)
@@ -47,14 +52,13 @@ export class D1BudgetGuard implements BudgetGuard {
       day = new Date(now).toISOString().slice(0, 10),
       id = crypto.randomUUID();
     // One SQLite write statement serializes all checks, including dedupe, across isolates.
-    await this.sql.run(
-      `INSERT INTO reservations(id,pool,ip_hash,session_id,image_sha,day,units,created_at)
+    const insert = {sql: `INSERT INTO reservations(id,pool,ip_hash,session_id,image_sha,day,units,created_at)
       SELECT ?,?,?,?,?,?,?,? WHERE
       NOT EXISTS(SELECT 1 FROM reservations WHERE session_id=? AND image_sha=? AND created_at>?)
       AND (SELECT COALESCE(SUM(units),0) FROM reservations WHERE pool=? AND status!='released')+?<=?
       AND (SELECT COUNT(*) FROM reservations WHERE ip_hash=? AND day=?)<2
       AND (SELECT COUNT(*) FROM reservations WHERE status='reserved')<2`,
-      [
+      args: [
         id,
         r.pool,
         r.ipHash,
@@ -71,8 +75,11 @@ export class D1BudgetGuard implements BudgetGuard {
         caps[r.pool],
         r.ipHash,
         day,
-      ],
-    );
+      ]};
+    if (this.jobMode && this.sql.batch) {
+      const stamp = new Date(now).toISOString();
+      await this.sql.batch([insert, {sql: "INSERT INTO jobs(id,state,mode,created_at,updated_at,session_id) SELECT id,'queued',?,?,?,session_id FROM reservations WHERE id=?", args:[this.jobMode,stamp,stamp,id]}]);
+    } else await this.sql.run(insert.sql, insert.args);
     const rows = await this.sql.all<{ id: string }>(
       `SELECT id FROM reservations WHERE session_id=? AND image_sha=? AND created_at>? ORDER BY created_at LIMIT 1`,
       [r.sessionId, r.imageSha256, now - 1800000],
@@ -187,6 +194,9 @@ export class MemoryBudgetGuard implements BudgetGuard {
   async abandon(id: string) {
     const r = this.rows.find(x => x.id === id);
     if (r?.status === 'reserved') r.status = 'abandoned';
+  }
+  async reconcileOrphans(existingJobIds: ReadonlySet<string>) {
+    for (const row of this.rows) if (row.status === "reserved" && row.at <= this.now()-1800000 && !existingJobIds.has(row.id)) row.status = "abandoned";
   }
   async status(): Promise<BudgetStatus> {
     const s: BudgetStatus = {
