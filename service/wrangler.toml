@@ -3,6 +3,8 @@ main = "worker.ts"
 compatibility_date = "2026-10-24"
 [vars]
 YOUCAM_MODE = "mock"
+# Provider storage host observed in the 10/24 18:33 live smoke (upload PUT + all 4 mask GETs). Live mode fails closed without it.
+YOUCAM_STORAGE_HOST_SUFFIXES = "yce-us.s3-accelerate.amazonaws.com"
 # Bind an existing D1 database as DB before deployment. No database is provisioned here.
 
 [triggers]
