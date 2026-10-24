@@ -60,7 +60,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
   readonly mode = "live" as const;
   constructor(
     private key: string,
-    private fetcher: typeof fetch = fetch,
+    private fetcher: typeof fetch = fetch.bind(globalThis),
   ) {}
   private async api(path: string, body?: unknown): Promise<any> {
     const res = await this.fetcher(HOST + path, {

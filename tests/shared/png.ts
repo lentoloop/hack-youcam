@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 /** Minimal fixture-only decoder: non-interlaced 8-bit RGBA PNG, all five row filters. */
-export function png(path: URL) {
-    const b = readFileSync(path);
+export function png(path: URL | Uint8Array) {
+    const b = path instanceof URL ? readFileSync(path) : Buffer.from(path);
     let width = 0, height = 0;
     const chunks: Uint8Array[] = [];
     for (let p = 8; p < b.length;) {

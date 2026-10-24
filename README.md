@@ -9,14 +9,16 @@ With existing dependencies, run `cd web && npm run dev`; the `/api` proxy expect
 Verification:
 
 ```sh
-cd web
-npx tsc --noEmit -p .
-npx vitest run
-npx vite build
-cd ..
-npx tsc -p tsconfig.contracts.json
+./service/node_modules/.bin/tsc -p tsconfig.contracts.json
 cd service
-npx vitest run ../tests/shared
+./node_modules/.bin/tsc -p tsconfig.json
+npm test                         # 58 service + 5 shared tests
+npm test -- ../tests/shared       # shared suite alone
+npm run test:e2e                  # offline Miniflare integration
+cd ../web
+./node_modules/.bin/tsc -p tsconfig.json
+npm test                         # 4 web + 5 shared tests
+npm run build
 ```
 
 Tests cover strict log import, framing comparison refusals, the real run2 mask fixture, a mocked browser upload, numbers-only download and deletion. No live API call is required.

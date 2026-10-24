@@ -18,10 +18,10 @@ Contract workarounds: reservation IDs are also job IDs because `BudgetGuard` has
 
 Run `npm run dev` in service; in another terminal run `npm run dev` in web. Vite proxies `/api` to port 8787. The service command bundles the real worker into Miniflare, creates ephemeral local D1, applies both migrations, generates a per-process privacy salt in memory, and blocks outbound fetches. No cloud account or provider credentials are needed.
 
-Run `cd service && npm run test:e2e` for the Miniflare/workerd + local D1 suite. It generates a valid solid-color JPEG in memory, uses the real web API client, waits the real ten-second polling interval, renders through jsdom and the real decision engine, checks severe-symptom escalation without product promotion, and verifies DELETE/GET/second DELETE. Nothing persists after disposal. Local compatibility date is 2026-05-03, the installed runtime maximum; deployment compatibility remains unchanged.
+Run `cd service && npm run test:e2e` for the Miniflare/workerd + local D1 suite. It generates a valid solid-color JPEG in memory, uses the real web API client, waits the real ten-second polling interval, decodes the returned PNG masks, builds and compares two Breakout Log entries, renders through jsdom, validates a numbers-only export, checks severe-symptom referral, and verifies DELETE/GET/second DELETE. Provider task deletion success/failure runs through the real worker with intercepted outbound fetches and seeded task rows; no paid task is submitted. Nothing persists after disposal. Local compatibility date is 2026-05-03, the installed runtime maximum; deployment compatibility remains unchanged.
 
 
-The legacy `smoke:live` step (`s4-live`) is exhausted and must not be run. The fixture now contains the URL-redacted Breakout Log run2 response, normalized in offline tests. Shared tests run under the web session; the service Vitest config includes service tests only.
+The legacy `smoke:live` step (`s4-live`) is exhausted and must not be run. The fixture now contains the URL-redacted Breakout Log run2 response, normalized in offline tests. Run `cd service && npm test` for all service and shared tests, or `cd service && npm test -- ../tests/shared` for only the shared log/region suite. Shared tests resolve Vitest from the existing service installation.
 
 ## Breakout Log v2
 
