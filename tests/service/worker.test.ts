@@ -85,7 +85,14 @@ describe("Worker API using SQLite and synthetic SOF headers", () => {
     const get = () => new Request("https://local/api/analyses/" + first.job.id);
     const result: any = await (await handle(get(), e)).json();
     expect(result.job.state).toBe("succeeded");
-    expect(result.observations).toHaveLength(4);
+    expect(result.observations).toHaveLength(3);
+    expect(result.zoneLabels).toHaveLength(3);
+    expect(Object.keys(result.masks).sort()).toEqual(["acne", "redness", "t_zone", "u_zone"]);
+    const held: any = await (await handle(get(), e)).json();
+    expect(held.zoneLabels).toEqual(result.zoneLabels);
+    expect(held.masks).toEqual(result.masks);
+    const rows = await e.DB.prepare("SELECT * FROM jobs").bind().all();
+    expect(JSON.stringify(rows)).not.toMatch(/data:image|Combination|Sensitive|zoneLabels|masks/);
     vi.advanceTimersByTime(1800000);
     expect((await handle(get(), e)).status).toBe(404);
   });
@@ -200,7 +207,7 @@ it('does not restore observations when a poll finishes after DELETE', async () =
     const pending = handle(new Request(url), e);
     await vi.waitFor(() => expect(poll).toHaveBeenCalled());
     expect((await handle(new Request(url, { method: 'DELETE' }), e)).status).toBe(204);
-    resolve({ state: 'succeeded', observations: [{ concern: 'moisture', rawScore: 40, source: 'mock' }] });
+    resolve({ state: 'succeeded', observations: [{ concern: 'acne', rawScore: 40, source: 'mock' }], zoneLabels: [], masks: {} });
     expect((await pending).status).toBe(404);
     expect((await handle(new Request(url), e)).status).toBe(404);
   } finally { poll.mockRestore(); }

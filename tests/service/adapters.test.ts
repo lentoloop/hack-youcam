@@ -65,7 +65,7 @@ describe("adapters and image validation", () => {
       {
         data: {
           task_status: "success",
-          results: { output: [{ type: "moisture", raw_score: 75, ui_score: 70, url: null }, { score: 84.5 }, { type: "unknown", raw_score: 50 }] },
+          results: { output: [{ type: "acne", raw_score: 75, ui_score: 70, url: null }, { score: 84.5 }, { type: "unknown", raw_score: 50 }] },
         },
       },
     ];
@@ -86,10 +86,10 @@ describe("adapters and image validation", () => {
     expect(JSON.parse(calls[2].init.body).format).toBe("json");
     expect(calls[1].init.headers.Authorization).toBeUndefined();
     expect(JSON.parse(calls[2].init.body).dst_actions).toEqual([
-      "moisture",
-      "oiliness",
+      "acne",
       "redness",
       "texture",
+      "skin_type",
     ]);
     expect(calls[0].init.headers.Authorization).toBe(["Bearer", "fake-key"].join(" "));
   });
@@ -166,4 +166,75 @@ it("deletes a provider task", async () => {
   await a.deleteTask("t");
   expect(calls[0].url).toBe("https://yce-api-01.makeupar.com/s2s/v2.0/task/delete");
   expect(JSON.parse(calls[0].init.body)).toEqual({ task_id: "t" });
+});
+
+import run2 from "../../service/fixtures/live-sample-result.json";
+import { run2Masks } from "../../service/fixtures/run2-masks";
+const pngs: Record<string, string> = { URL_4: run2Masks.acne!, URL_3: run2Masks.redness!, URL_6: run2Masks.t_zone!, URL_7: run2Masks.u_zone! };
+function sample() {
+  const data = structuredClone(run2.json.data);
+  for (const row of data.results.output)
+    if (row.mask_urls) row.mask_urls = row.mask_urls.map(v => `https://mask.example/${v}`);
+  return { data };
+}
+function png(token: string) {
+  return Uint8Array.from(atob(pngs[token].split(",")[1]), c => c.charCodeAt(0));
+}
+it("normalizes run2 evidence, fetching exactly four real PNGs without leaking URLs", async () => {
+  const calls: string[] = [];
+  const a = new LiveAdapter("fake", (async (url: any, init: any) => {
+    calls.push(String(url));
+    if (String(url).includes("/skin-analysis/")) return Response.json(sample());
+    expect(init.headers).toBeUndefined();
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.redirect).toBe("error");
+    return new Response(png(String(url).split("/").pop()!));
+  }) as typeof fetch);
+  const result = await a.poll("t");
+  expect(result).toMatchObject({ state: "succeeded", masks: run2Masks });
+  if (result.state !== "succeeded") throw Error("Expected success");
+  expect(result.observations).toHaveLength(3);
+  expect(result.zoneLabels).toEqual([
+    { region: "whole", label: "Combination & Sensitive", source: "live" },
+    { region: "t_zone", label: "Oily", source: "live" },
+    { region: "u_zone", label: "Dry & Sensitive", source: "live" },
+  ]);
+  expect(calls.slice(1).sort()).toEqual(Object.keys(pngs).map(k => "https://mask.example/" + k).sort());
+  expect(JSON.stringify(result)).not.toMatch(/https?:|URL_\d|mask_urls/);
+});
+it.each(["oversize", "header-oversize", "not-png", "http", "failure"])("drops only invalid acne mask: %s", async kind => {
+  const body = sample();
+  if (kind === "http") body.data.results.output.find(r => r.type === "acne")!.mask_urls = ["http://mask.example/URL_4"];
+  const calls: string[] = [];
+  const a = new LiveAdapter("fake", (async (url: any) => {
+    calls.push(String(url));
+    if (String(url).includes("/skin-analysis/")) return Response.json(body);
+    const token = String(url).split("/").pop()!;
+    if (token === "URL_4") {
+      if (kind === "failure") throw Error("Private provider URL");
+      if (kind === "oversize") return new Response(new Uint8Array(512 * 1024 + 1));
+      if (kind === "header-oversize") return new Response(png(token), { headers: { "content-length": String(512 * 1024 + 1) } });
+      return new Response("not a PNG");
+    }
+    return new Response(png(token));
+  }) as typeof fetch);
+  const result = await a.poll("t");
+  if (result.state !== "succeeded") throw Error("Expected success");
+  expect(Object.keys(result.masks).sort()).toEqual(["redness", "t_zone", "u_zone"]);
+  expect(result.observations).toHaveLength(3);
+  expect(JSON.stringify(result)).not.toMatch(/https?:|Private provider/);
+  if (kind === "http") expect(calls.some(c => c.startsWith("http:"))).toBe(false);
+});
+it("ignores invalid scores, unknown regions, and scored skin_type", async () => {
+  const body = { data: { task_status: "success", results: { output: [
+    { type: "acne", raw_score: 0 }, { type: "redness", raw_score: 101 },
+    { type: "texture", raw_score: 1, ui_score: 101 },
+    { type: "acne", raw_score: 100, ui_score: 1 },
+    { type: "skin_type", raw_score: 50, region: "unknown", skin_type: "Oily" },
+  ] } } };
+  const result = await new LiveAdapter("fake", async () => Response.json(body)).poll("t");
+  expect(result).toEqual({ state: "succeeded", observations: [
+    { concern: "texture", rawScore: 1, source: "live" },
+    { concern: "acne", rawScore: 100, uiScore: 1, source: "live" },
+  ], zoneLabels: [], masks: {} });
 });

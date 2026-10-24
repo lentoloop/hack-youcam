@@ -1,5 +1,10 @@
+import { run2Masks } from "./fixtures/run2-masks";
 import {
   CONCERNS,
+  SCORED_CONCERNS,
+  type MaskSet,
+  type MaskKind,
+  type ZoneLabel,
   type AdapterEnv,
   type AnalysisErrorCode,
   type NormalizedImage,
@@ -36,11 +41,17 @@ export class MockAdapter implements SkinAnalysisAdapter {
       };
     return {
       state: "succeeded",
-      observations: CONCERNS.map((concern, i) => ({
+      observations: SCORED_CONCERNS.map((concern, i) => ({
         concern,
         rawScore: 40 + i * 10,
         source: "mock",
       })),
+      zoneLabels: [
+        { region: "whole", label: "Combination & Sensitive", source: "mock" },
+        { region: "t_zone", label: "Oily", source: "mock" },
+        { region: "u_zone", label: "Dry & Sensitive", source: "mock" },
+      ],
+      masks: { ...run2Masks },
     };
   }
 }
@@ -133,6 +144,40 @@ export class LiveAdapter implements SkinAnalysisAdapter {
   async deleteTask(taskId: string): Promise<void> {
     await this.api("/s2s/v2.0/task/delete", { task_id: taskId });
   }
+  private async downloadMask(value: unknown): Promise<string | undefined> {
+    try {
+      if (typeof value !== "string" || new URL(value).protocol !== "https:") return;
+      const response = await this.fetcher(value, {
+        signal: AbortSignal.timeout(10000), redirect: "error",
+      });
+      if (!response.ok) return;
+      if (Number(response.headers.get("content-length")) > 512 * 1024) {
+        await response.body?.cancel();
+        return;
+      }
+      const reader = response.body?.getReader();
+      if (!reader) return;
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        while (true) {
+          const part = await reader.read();
+          if (part.done) break;
+          size += part.value.length;
+          if (size > 512 * 1024) { await reader.cancel(); return; }
+          chunks.push(part.value);
+        }
+      } finally { reader.releaseLock(); }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+      if (![137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes[i] === b)) return;
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 8192)
+        binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+      return "data:image/png;base64," + btoa(binary);
+    } catch { return; } // Masks are optional; never expose provider URLs or errors.
+  }
   async poll(id: string): Promise<ProviderPoll> {
     const data = await this.api(
       `/s2s/v2.0/task/skin-analysis/${encodeURIComponent(id)}`,
@@ -159,7 +204,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
     const observations: Observation[] = data.results.output
       .filter(
         (r: any) =>
-          CONCERNS.includes(r.type) &&
+          SCORED_CONCERNS.includes(r.type) &&
           Number.isFinite(r.raw_score) &&
           r.raw_score >= 1 &&
           r.raw_score <= 100,
@@ -172,7 +217,19 @@ export class LiveAdapter implements SkinAnalysisAdapter {
           ? { uiScore: r.ui_score }
           : {}),
       }));
-    return { state: "succeeded", observations };
+    const zoneLabels: ZoneLabel[] = data.results.output
+      .filter((r: any) => r.type === "skin_type" &&
+        ["whole", "t_zone", "u_zone"].includes(r.region) && typeof r.skin_type === "string")
+      .map((r: any) => ({ region: r.region, label: r.skin_type, source: "live" }));
+    const masks: MaskSet = {};
+    await Promise.all((["acne", "redness", "t_zone", "u_zone"] as MaskKind[]).map(async key => {
+      const row = data.results.output.find((r: any) =>
+        key === "acne" || key === "redness" ? r.type === key :
+          r.type === "skin_type" && r.region === key);
+      const mask = await this.downloadMask(row?.mask_urls?.[0]);
+      if (mask) masks[key] = mask;
+    }));
+    return { state: "succeeded", observations, zoneLabels, masks };
   }
 }
 export function createAdapter(

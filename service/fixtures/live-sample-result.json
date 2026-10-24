@@ -1,54 +1,85 @@
 {
   "status": 200,
-  "data": {
-    "error": null,
-    "results": {
-      "output": [
-        {
-          "ui_score": 80,
-          "mask_urls": "[REDACTED]",
-          "raw_score": 78.75497341156006,
-          "type": "texture",
-          "url": "[REDACTED]"
-        },
-        {
-          "ui_score": 76,
-          "mask_urls": "[REDACTED]",
-          "raw_score": 69.2258529663086,
-          "type": "redness",
-          "url": "[REDACTED]"
-        },
-        {
-          "ui_score": 69,
-          "mask_urls": "[REDACTED]",
-          "raw_score": 53.627201080322266,
-          "type": "oiliness",
-          "url": "[REDACTED]"
-        },
-        {
-          "ui_score": 68,
-          "mask_urls": "[REDACTED]",
-          "raw_score": 45.06698548793793,
-          "type": "moisture",
-          "url": "[REDACTED]"
-        },
-        {
-          "score": 73.25,
-          "type": "all",
-          "url": "[REDACTED]"
-        },
-        {
-          "score": 51,
-          "type": "skin_age",
-          "url": "[REDACTED]"
-        },
-        {
-          "mask_urls": "[REDACTED]",
-          "type": "resize_image",
-          "url": "[REDACTED]"
-        }
-      ]
-    },
-    "task_status": "success"
+  "json": {
+    "status": 200,
+    "data": {
+      "error": null,
+      "results": {
+        "output": [
+          {
+            "ui_score": 70,
+            "mask_urls": [
+              "URL_2"
+            ],
+            "raw_score": 55.699509382247925,
+            "type": "texture",
+            "url": null
+          },
+          {
+            "ui_score": 60,
+            "mask_urls": [
+              "URL_3"
+            ],
+            "raw_score": 32.16484832763672,
+            "type": "redness",
+            "url": null
+          },
+          {
+            "ui_score": 66,
+            "mask_urls": [
+              "URL_4"
+            ],
+            "raw_score": 45.7384,
+            "type": "acne",
+            "url": null
+          },
+          {
+            "mask_urls": [
+              "URL_5"
+            ],
+            "type": "skin_type",
+            "region": "whole",
+            "skin_type": "Combination & Sensitive",
+            "url": null
+          },
+          {
+            "mask_urls": [
+              "URL_6"
+            ],
+            "type": "skin_type",
+            "region": "t_zone",
+            "skin_type": "Oily",
+            "url": null
+          },
+          {
+            "mask_urls": [
+              "URL_7"
+            ],
+            "type": "skin_type",
+            "region": "u_zone",
+            "skin_type": "Dry & Sensitive",
+            "url": null
+          },
+          {
+            "score": 65.33333333333333,
+            "type": "all",
+            "url": null
+          },
+          {
+            "score": 30,
+            "type": "skin_age",
+            "url": null
+          },
+          {
+            "mask_urls": [
+              "URL_8"
+            ],
+            "type": "resize_image",
+            "url": null
+          }
+        ]
+      },
+      "task_status": "success"
+    }
   }
 }

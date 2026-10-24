@@ -6,6 +6,8 @@ import {
   type AnalysisJob,
   type ApiError,
   type Observation,
+  type ZoneLabel,
+  type MaskSet,
   type BudgetPool,
 } from "../contracts";
 import {
@@ -27,7 +29,7 @@ export interface Env extends AdapterEnv {
 // An isolate restart loses results; callers must retake. Images are not retained after submit.
 const results = new Map<
   string,
-  { expires: number; observations: Observation[] }
+  { expires: number; observations: Observation[]; zoneLabels: ZoneLabel[]; masks: MaskSet }
 >();
 const polls = new Map<string, Promise<Response>>();
 const json = (value: unknown, status = 200) =>
@@ -295,10 +297,10 @@ export async function handle(request: Request, env: Env): Promise<Response> {
             "Session results are no longer available. Retake the photo.",
             404,
           );
-        return json({ job: job(row), observations: result.observations });
+        return json({ job: job(row), observations: result.observations, zoneLabels: result.zoneLabels, masks: result.masks });
       }
       if (row.state === "failed" || !row.provider_task_id)
-        return json({ job: job(row), observations: [] });
+        return json({ job: job(row), observations: [], zoneLabels: [] });
       if (polls.has(id)) return await polls.get(id)!;
       // Provider polls are spaced at least ten seconds, including across isolates.
       const claimed = await sql.run(
@@ -310,7 +312,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
           new Date(Date.now() - POLLING.intervalMs).toISOString(),
         ],
       );
-      if (!claimed) return json({ job: job(row), observations: [] });
+      if (!claimed) return json({ job: job(row), observations: [], zoneLabels: [] });
       const pending = (async () => {
         try {
           const poll = await createAdapter(env).poll(row.provider_task_id!);
@@ -319,6 +321,8 @@ export async function handle(request: Request, env: Env): Promise<Response> {
             if (!await deleted(id)) results.set(id, {
               expires: Date.parse(row.created_at) + 1800000,
               observations: poll.observations,
+              zoneLabels: poll.zoneLabels,
+              masks: poll.masks,
             });
             await sql.run(
               "UPDATE jobs SET state='succeeded',error_code=NULL WHERE id=?",
@@ -351,6 +355,8 @@ export async function handle(request: Request, env: Env): Promise<Response> {
             (await sql.all<Row>("SELECT * FROM jobs WHERE id=?", [id]))[0],
           ),
           observations: results.get(id)?.observations ?? [],
+          zoneLabels: results.get(id)?.zoneLabels ?? [],
+          ...(results.has(id) ? { masks: results.get(id)!.masks } : {}),
         });
       })();
       polls.set(id, pending);
