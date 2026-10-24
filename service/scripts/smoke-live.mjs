@@ -41,7 +41,9 @@ async function main() {
       outcome = "unresolved";
     }
     let res;
-    try { res = await fetch(input, init); }
+    try { res = await fetch(input, { ...init, redirect: "manual" });
+      if ((res.status >= 300 && res.status < 400) || res.status === 0 || res.type === "opaqueredirect")
+        throw Object.assign(new Error("Outbound redirect response rejected."), { code: "provider_error" }); }
     catch { await log(endpoint, "network-error"); throw Error("Network request failed"); }
     let body;
     if (provider) { try { body = await res.clone().json(); } catch {} }

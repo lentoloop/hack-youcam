@@ -1,6 +1,7 @@
 import { describe, it, expect } from "../../service/node_modules/vitest";
 import {
   LiveAdapter,
+  outboundFetch,
   MockAdapter,
   createAdapter,
   validStorageUrl,
@@ -82,7 +83,7 @@ describe("adapters and image validation", () => {
       observations: [{ rawScore: 75, source: "live" }],
     });
     expect(calls[1].init.method).toBe("PUT");
-    expect(calls.every(call => call.init.redirect === "error")).toBe(true);
+    expect(calls.every(call => call.init.redirect === "manual")).toBe(true);
     expect(calls[1].init.headers).toEqual({ "Content-Length": String(image.bytes.length), "Content-Type": "image/jpeg" });
     expect(JSON.parse(calls[0].init.body)).toEqual({ files: [{ content_type: "image/jpeg", file_name: "capture.jpg", file_size: image.bytes.length }] });
     expect(JSON.parse(calls[2].init.body).format).toBe("json");
@@ -189,7 +190,7 @@ it("normalizes run2 evidence, fetching exactly four real PNGs without leaking UR
     if (String(url).includes("/skin-analysis/")) return Response.json(sample());
     expect(init.headers).toBeUndefined();
     expect(init.signal).toBeInstanceOf(AbortSignal);
-    expect(init.redirect).toBe("error");
+    expect(init.redirect).toBe("manual");
     return new Response(png(String(url).split("/").pop()!));
   }) as typeof fetch);
   const result = await a.poll("t");
@@ -268,9 +269,49 @@ it.each(['truncated', 'huge', 'rgb'])('omits a bad IHDR before returning mask: %
 
 it.each(['submit', 'poll', 'deleteTask'] as const)('rejects provider API redirects during %s', async operation => {
   const adapter = new LiveAdapter('synthetic', async (_url, init) => {
-    expect(init?.redirect).toBe('error');
+    expect(init?.redirect).toBe('manual');
     return new Response(null, { status: 307, headers: { location: '/redirect' } });
   });
   const result = operation === 'submit' ? adapter.submit(image) : adapter[operation]('private');
   await expect(result).rejects.toMatchObject({ code: 'provider_error', status: 502 });
+});
+
+it.each([301, 302, 303, 304, 307, 308, 399, 0, 'opaque'] as const)('rejects redirect-like response %s with one dispatch', async status => {
+  let calls = 0;
+  const response = status === 0 ? Response.error() : status === 'opaque'
+    ? { status: 200, type: 'opaqueredirect' } as Response
+    : new Response(null, { status, headers: { location: 'https://never.example/' } });
+  await expect(outboundFetch(async (_url, init) => {
+    calls++;
+    expect(init?.redirect).toBe('manual');
+    return response;
+  }, 'https://provider.example')).rejects.toMatchObject({ code: 'provider_error', status: 502, message: 'Outbound redirect response rejected.' });
+  expect(calls).toBe(1);
+});
+it('rejects an upload redirect before task submission', async () => {
+  const calls: string[] = [];
+  const adapter = new LiveAdapter('synthetic', async (url, init) => {
+    calls.push(String(url));
+    expect(init?.redirect).toBe('manual');
+    return calls.length === 1 ? Response.json({ data: { files: [{ file_id: 'f', requests: [{ url: 'https://upload.example/x' }] }] } })
+      : new Response(null, { status: 307, headers: { location: 'https://never.example/' } });
+  });
+  await expect(adapter.submit(image)).rejects.toMatchObject({ code: 'provider_error', safeToRelease: true, message: 'Outbound redirect response rejected.' });
+  expect(calls).toHaveLength(2);
+});
+it('omits redirected masks without following or losing scores', async () => {
+  const calls: string[] = [];
+  const adapter = new LiveAdapter('synthetic', async (url, init) => {
+    calls.push(String(url));
+    expect(init?.redirect).toBe('manual');
+    return calls.length === 1 ? Response.json(sample()) : new Response(null, { status: 302, headers: { location: 'https://never.example/' } });
+  });
+  const result = await adapter.poll('t');
+  expect(result).toMatchObject({ state: 'succeeded', masks: {} });
+  if (result.state === 'succeeded') expect(result.observations).toHaveLength(3);
+  expect(calls).toHaveLength(5);
+  expect(calls.some(url => url.includes('never.example'))).toBe(false);
+});
+it.each(['', ' ', '.', ' , . , ', '*', '*.example.com', 'example.com,*', '..', 'https://example.com'])('rejects malformed live allowlist %s', suffixes => {
+  expect(() => createAdapter({ YOUCAM_MODE: 'live', YOUCAM_API_KEY: 'synthetic', YOUCAM_STORAGE_HOST_SUFFIXES: suffixes } as any)).toThrow('allowlist');
 });

@@ -103,7 +103,7 @@ it('DELETE removes results; GET and second DELETE return uniform not_found', asy
 });
 it.each([false, true])('real worker attempts provider task/delete; failure=%s still deletes locally', async fails => {
   const calls: { url: string; method: string; body: unknown }[] = [];
-  const provider = new Miniflare({ modules: true, script: (await build({ entryPoints: ['worker.ts'], bundle: true, write: false, format: 'esm', platform: 'browser' })).outputFiles[0].text, compatibilityDate: '2026-05-03', d1Databases: ['DB'], bindings: { YOUCAM_MODE: 'live', YOUCAM_API_KEY: 'synthetic-test-only' }, outboundService: async request => {
+  const provider = new Miniflare({ modules: true, script: (await build({ entryPoints: ['worker.ts'], bundle: true, write: false, format: 'esm', platform: 'browser' })).outputFiles[0].text, compatibilityDate: '2026-05-03', d1Databases: ['DB'], bindings: { YOUCAM_MODE: 'live', YOUCAM_API_KEY: 'synthetic-test-only', YOUCAM_STORAGE_HOST_SUFFIXES: 'storage.example.com' }, outboundService: async request => {
     calls.push({ url: request.url, method: request.method, body: await request.json() });
     return new Response('{}', { status: fails ? 503 : 200 });
   } });
@@ -124,4 +124,33 @@ it.each([false, true])('real worker attempts provider task/delete; failure=%s st
       expect(await response.json()).toMatchObject({ error: { code: 'not_found', retryable: false } });
     }
   } finally { await provider.dispose(); }
+});
+
+it('workerd accepts real outbound init and rejects redirects with exactly one dispatch', async () => {
+  const bundle = await build({ stdin: { contents: `
+    import { LiveAdapter } from './adapters';
+    export default { async fetch(request) {
+      try {
+        await new LiveAdapter('synthetic').deleteTask(new URL(request.url).pathname);
+        return Response.json({ ok: true });
+      } catch (error) {
+        return Response.json({ code: error.code, message: error.message }, { status: 502 });
+      }
+    } };
+  `, resolveDir: process.cwd() }, bundle: true, write: false, format: 'esm', platform: 'browser' });
+  const calls: string[] = [];
+  const runtime = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-05-03', outboundService: async request => {
+    calls.push(request.url);
+    const body = await request.json() as { task_id: string };
+    return body.task_id === '/success' ? Response.json({ data: {} })
+      : new Response(null, { status: 307, headers: { location: 'https://never.example/redirect' } });
+  } });
+  try {
+    const success = await runtime.dispatchFetch('http://local/success');
+    expect(await success.json()).toEqual({ ok: true });
+    const redirect = await runtime.dispatchFetch('http://local/redirect');
+    expect(redirect.status).toBe(502);
+    expect(await redirect.json()).toEqual({ code: 'provider_error', message: 'Outbound redirect response rejected.' });
+    expect(calls).toEqual(Array(2).fill('https://yce-api-01.makeupar.com/s2s/v2.0/task/delete'));
+  } finally { await runtime.dispose(); }
 });

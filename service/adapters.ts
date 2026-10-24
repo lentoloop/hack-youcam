@@ -23,6 +23,20 @@ export class ServiceError extends Error {
     super(message);
   }
 }
+// One dispatch, no redirect hops or retries: cleanup's subrequest bound relies on this.
+export async function outboundFetch(
+  fetcher: typeof fetch,
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  const response = await fetcher(input, { ...init, redirect: "manual" });
+  if ((response.status >= 300 && response.status < 400) ||
+      response.status === 0 || response.type === "opaqueredirect") {
+    await response.body?.cancel();
+    throw new ServiceError("provider_error", "Outbound redirect response rejected.", 502);
+  }
+  return response;
+}
 export type MockFixture =
   "success" | "error_no_face" | "error_src_face_too_small" | "timeout";
 export class MockAdapter implements SkinAnalysisAdapter {
@@ -65,9 +79,8 @@ export class LiveAdapter implements SkinAnalysisAdapter {
     private storageSuffixes = "",
   ) {}
   private async api(path: string, body?: unknown): Promise<any> {
-    const res = await this.fetcher(HOST + path, {
+    const res = await outboundFetch(this.fetcher, HOST + path, {
       method: body ? "POST" : "GET",
-      redirect: "error",
       headers: {
         Authorization: ["Bearer", this.key].join(" "),
         "Content-Type": "application/json",
@@ -110,9 +123,8 @@ export class LiveAdapter implements SkinAnalysisAdapter {
           "Invalid upload destination.",
           502,
         );
-      const upload = await this.fetcher(url, {
+      const upload = await outboundFetch(this.fetcher, url, {
         method: instruction.method ?? "PUT",
-        redirect: "error",
         headers: instruction.headers ?? { "Content-Type": "image/jpeg" },
         body: image.bytes as BodyInit,
         signal: AbortSignal.timeout(20000),
@@ -138,7 +150,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
       if (!taskSubmissionStarted)
         throw new ServiceError(
           "provider_error",
-          "Image upload could not be completed.",
+          error instanceof ServiceError ? error.message : "Image upload could not be completed.",
           502,
           true,
         );
@@ -151,8 +163,8 @@ export class LiveAdapter implements SkinAnalysisAdapter {
   private async downloadMask(value: unknown): Promise<string | undefined> {
     try {
       if (typeof value !== "string" || !validStorageUrl(new URL(value), this.storageSuffixes)) return;
-      const response = await this.fetcher(value, {
-        signal: AbortSignal.timeout(10000), redirect: "error",
+      const response = await outboundFetch(this.fetcher, value, {
+        signal: AbortSignal.timeout(10000),
       });
       if (!response.ok) return;
       if (Number(response.headers.get("content-length")) > 512 * 1024) {
@@ -248,7 +260,8 @@ export function createAdapter(
       503,
     );
   const suffixes = (env as AdapterEnv & { YOUCAM_STORAGE_HOST_SUFFIXES?: string }).YOUCAM_STORAGE_HOST_SUFFIXES;
-  if (!normalizedStorageSuffixes(suffixes).length)
+  if (!normalizedStorageSuffixes(suffixes).length ||
+      normalizedStorageSuffixes(suffixes).some(s => !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(s)))
     throw new ServiceError("live_unavailable", "Live storage host allowlist is not configured (YOUCAM_STORAGE_HOST_SUFFIXES).", 503);
   return new LiveAdapter(env.YOUCAM_API_KEY, fetcher, suffixes);
 }
