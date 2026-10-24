@@ -1,0 +1,6 @@
+import { defineConfig } from "vitest/config";
+export default defineConfig({
+  test: {
+    include: ["../tests/service/**/*.test.ts", "../tests/shared/**/*.test.ts"],
+  },
+});

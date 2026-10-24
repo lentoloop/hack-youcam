@@ -1,0 +1,6 @@
+name = "before-another-bottle"
+main = "worker.ts"
+compatibility_date = "2026-10-24"
+[vars]
+YOUCAM_MODE = "mock"
+# Bind an existing D1 database as DB before deployment. No database is provisioned here.

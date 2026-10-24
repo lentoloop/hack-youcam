@@ -1,0 +1,14 @@
+S1 service implemented on task/s1-service; changes remain uncommitted.
+Worker: consent, bounded multipart JPEG/SOF validation, uniform errors, POST/GET jobs.
+Adapters: synthetic mock fixtures and injectable-fetch live flow; no YouCam calls made.
+Budget: atomic D1 SQL + memory guard, 990-unit pool isolation, hashed IP cap, concurrency, session dedupe.
+Mock ledger never consumes live units; success commits, definitive failure releases, ambiguous timeout retains hold.
+Results are isolate-local, logically expire at 30 minutes; D1 stores accounting only.
+Decision engine implements all four actions without score-severity thresholds or fabricated evidence.
+Verification: npm install, strict service tsc, root typecheck:contracts, 50 tests across 4 files PASS.
+Dependency audit: zero vulnerabilities; SQLite tests run on better-sqlite3 11.10.0.
+Commit hashes: NONE — git add failed creating .git/worktrees/s1-service/index.lock (read-only filesystem).
+Open issues: bind existing D1/secrets before use; unknown task-submission outcomes require manual reconciliation.
+Unconfirmed: provider upload/result schemas, score direction, source-image retention; marked in adapter code.
+Contract issues: no session-exit endpoint/credential or reservation-to-job linker; random job IDs act as capabilities, reservation IDs equal job IDs.
+No -o destination was supplied in the prompt; result saved here. No push, deploy, login, accounts, or frozen-file edits.
