@@ -1,19 +1,17 @@
 # Privacy
 
-Breakout Log records cosmetic appearance and self-reported product changes. It does not determine causes or provide medical advice. Scores range from 1–100; higher means healthier skin. Skin-type labels pass through verbatim. Zone counts are estimates computed by this app in your browser from YouCam masks, not provider counts.
+Breakout Log records cosmetic appearance and self-reported product changes, without determining causes or providing medical advice.
 
-Before any face upload, use this exact consent sentence:
+The UI renders this exact consent (version `2026-10-24.v3`):
 
 ```text
-I have permission to upload this face to Perfect Corp. for cosmetic analysis; the provider retains uploaded files for up to 30 days, and result/mask URLs expire after 2 hours; our app keeps results only in memory for no more than 30 minutes and deletes them on exit; masks are used in your browser to estimate zone counts and are never stored; the downloaded log holds numbers only (no photo, no masks, no URLs); this is not medical advice.
+I have permission to upload this face to Perfect Corp. for cosmetic analysis. Perfect Corp. keeps uploaded files for up to 30 days; result and mask links expire after 2 hours. This app holds the scores and the YouCam masks in memory for at most 30 minutes to estimate zone counts in my browser, and tries to delete the analysis (here and at Perfect Corp.) when I press Delete or leave the page; deletion is best effort and the app shows if it failed. A downloaded log contains scores, skin-type labels, the app's zone estimates, and the dates, product categories, notes and symptoms I type, but no photo, masks or links. This is not medical advice.
 ```
 
-Consent text version: `2026-10-24.v2` (`CONSENT_TEXT_VERSION`). Consent acceptance time and version accompany the JPEG and random session identifier. Optional access codes route budget reservations; API keys stay server-side.
+The browser re-encodes the JPEG to strip metadata; the service forwards it without retaining the photo after submission. Scores, labels and masks have an in-memory logical access expiry of 30 minutes. Physical eviction may be lazy in idle isolates; deletion on one isolate revokes access globally via a D1 tombstone but other isolates may retain inaccessible memory until later eviction. Browser masks are transient inputs for zone estimates.
 
-The browser resizes and re-encodes the JPEG to strip metadata before upload. The service forwards the photo to Perfect Corp. and does not retain it after submission. Results, labels, and masks are held only in memory for at most 30 minutes. Masks travel to the same session as PNG data URLs; provider mask URLs never leave the service. Masks and labels are never written to D1 or logs. Only task/quota accounting and deletion tombstones persist.
+DELETE revokes local access immediately and returns visible provider cleanup status. Failed or pending cleanup can be retried with the same job id. Page close uses a keepalive DELETE; delivery is best effort. A Workers Free Cron Trigger runs every 15 minutes, reconciling up to 20 expired (older than 30 minutes) or tombstoned jobs per run. This covers page close during a pending POST once the job expires; backlog can delay cleanup. Ambiguous task creation without a recorded task id cannot be deleted by us and is marked unknown_task. Task deletion does not guarantee uploaded-file deletion: Perfect Corp.'s 30-day file retention and 2-hour result/mask link validity still apply.
 
-DELETE `/api/analyses/:id` clears the in-memory result, including labels and masks, and prevents subsequent GET access. Exit deletion delivery is best-effort, with expiry as a backstop. The live path also attempts provider task deletion; provider failure does not block local deletion and immediate provider removal is not guaranteed.
+D1 stores job/session identifiers, salted IP hashes, image digests, timestamps, quota accounting and tombstones, plus server-only provider task handles and cleanup status/attempts. Handles are nulled after confirmed cleanup. Numeric accounting and tombstones remain; uncertain units stay held without occupying concurrency. Results, labels and masks are not written to D1. The approved synthetic smoke workflow writes masks to a local restricted result artifact, distinct from the user log.
 
-Perfect Corp. retains uploaded files for up to 30 days. Result and mask URLs expire after 2 hours. These provider periods differ from our app's 30-minute memory limit.
-
-The downloaded appearance log contains numbers and text, including self-reports and skin-type labels, but no photo, masks, URLs, or provider task IDs. It stays on the user's device unless the user chooses to share it. Mock masks come from a synthetic AI face (Kai spike run2) and are labeled Mock; sample results must be labeled Sample. No face photograph is bundled.
+Downloaded logs contain scores, skin-type labels, zone estimates, dates, product categories, notes, areas, discomfort and the severe-symptom flag. They exclude photos, masks, provider task ids and URLs. Import/export validation limits text lengths and rejects recognizable image payloads, but cannot detect every covert encoding in arbitrary prose. The downloaded file remains on your device unless you share it.

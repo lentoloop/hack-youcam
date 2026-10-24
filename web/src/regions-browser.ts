@@ -1,3 +1,4 @@
+import { validMaskHeader } from "../../shared/png";
 import type { MaskSet } from '../../contracts/analysis';
 import type { RgbaImage } from '../../contracts/log';
 import { deriveRegions } from '../../shared/regions';
@@ -5,6 +6,7 @@ export async function decodeMask(data: string): Promise<RgbaImage> {
     if (!/^data:image\/png;base64,[a-z\d+/=]+$/i.test(data))
         throw Error('Invalid mask encoding.');
     const bytes = Uint8Array.from(atob(data.slice(data.indexOf(',') + 1)), c => c.charCodeAt(0));
+    if (!validMaskHeader(bytes)) throw Error('Invalid mask dimensions or format.');
     const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
     try {
         const canvas = document.createElement('canvas');
@@ -21,6 +23,7 @@ export async function decodeMask(data: string): Promise<RgbaImage> {
     }
 }
 export async function regionsFromMasks(masks: MaskSet) {
-    const [acne, redness, tZone, uZone] = await Promise.all([masks.acne, masks.redness, masks.t_zone, masks.u_zone].map(v => v ? decodeMask(v) : undefined));
+    const [acne, redness, tZone, uZone] = await Promise.all([masks.acne, masks.redness, masks.t_zone, masks.u_zone].map(v => v ? decodeMask(v).catch(() => undefined) : undefined));
+    if (!acne || !redness || !tZone || !uZone) return undefined;
     return deriveRegions({ acne, redness, tZone, uZone });
 }

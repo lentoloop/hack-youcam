@@ -10,6 +10,7 @@ export function database() {
     ),
   );
   db.exec(readFileSync(new URL("../../service/migrations/0002.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../../service/migrations/0003.sql", import.meta.url), "utf8"));
   const sql: SqlExecutor = {
     async all(sql, args = []) {
       return db.prepare(sql).all(...args) as any;

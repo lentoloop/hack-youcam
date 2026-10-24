@@ -3,6 +3,7 @@ import {
   IMAGE_LIMITS,
   POLLING,
   type AdapterEnv,
+  type ProviderCleanup,
   type AnalysisJob,
   type ApiError,
   type Observation,
@@ -24,6 +25,7 @@ export interface Env extends AdapterEnv {
   IP_HASH_SECRET?: string;
   JUDGE_CODE?: string;
   DEV_CODE?: string;
+  YOUCAM_STORAGE_HOST_SUFFIXES?: string;
 }
 // Results exist only in this isolate, expire after 30 minutes, and are never written to D1.
 // An isolate restart loses results; callers must retake. Images are not retained after submit.
@@ -47,6 +49,8 @@ function fail(code: ApiError["error"]["code"], message: string, status = 400) {
   );
 }
 interface Row {
+  cleanup_status: ProviderCleanup;
+  submit_started: number;
   id: string;
   state: AnalysisJob["state"];
   mode: AnalysisJob["mode"];
@@ -64,7 +68,6 @@ function job(row: Row): AnalysisJob {
     source: row.mode,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    ...(row.provider_task_id ? { providerTaskId: row.provider_task_id } : {}),
     ...(row.error_code
       ? {
           error: {
@@ -233,22 +236,24 @@ export async function handle(request: Request, env: Env): Promise<Response> {
         [id, "queued", env.YOUCAM_MODE, now, now, meta.sessionId],
       );
       try {
+        await sql.run("UPDATE jobs SET submit_started=1 WHERE id=?", [id]);
         const task = await adapter.submit(image);
         await sql.run(
-          "UPDATE jobs SET state='running',provider_task_id=?,updated_at=? WHERE id=?",
+          "UPDATE jobs SET cleanup_status='pending',state='running',provider_task_id=?,updated_at=? WHERE id=?",
           [task.providerTaskId, new Date().toISOString(), id],
         );
       } catch (error) {
         if (error instanceof ServiceError && error.safeToRelease) {
           await budget.release(id);
           await sql.run(
-            "UPDATE jobs SET state='failed',error_code='provider_error',updated_at=? WHERE id=?",
+            "UPDATE jobs SET cleanup_status='not_applicable',state='failed',error_code='provider_error',updated_at=? WHERE id=?",
             [new Date().toISOString(), id],
           );
         } else {
-          // Ambiguous submission failure may have created a paid task. Keep reservation, never recreate.
+          // Ambiguous creation keeps unit liability but frees execution capacity.
+          await budget.abandon(id);
           await sql.run(
-            "UPDATE jobs SET error_code='timeout',updated_at=? WHERE id=?",
+            "UPDATE jobs SET cleanup_status='unknown_task',error_code='timeout',updated_at=? WHERE id=?",
             [new Date().toISOString(), id],
           );
         }
@@ -268,17 +273,11 @@ export async function handle(request: Request, env: Env): Promise<Response> {
     if (request.method === "DELETE" && match) {
       const id = decodeURIComponent(match[1]);
       const row = (await sql.all<Row>("SELECT * FROM jobs WHERE id=?", [id]))[0];
-      if (!row || await deleted(id)) return fail("not_found", "This session result has expired or does not exist.", 404);
+      if (!row) return fail("not_found", "This session result does not exist.", 404);
       await sql.run("INSERT OR IGNORE INTO deleted_jobs(id) VALUES(?)", [id]);
       results.delete(id);
-      if (row.mode === "live" && env.YOUCAM_MODE === "live" && env.YOUCAM_API_KEY && row.provider_task_id) {
-        try {
-          await new LiveAdapter(env.YOUCAM_API_KEY).deleteTask(row.provider_task_id);
-        } catch {
-          // Provider cleanup is best-effort; local deletion already completed.
-        }
-      }
-      return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+      await budget.abandon(id);
+      return json({ local: "deleted", provider: await cleanup(row, env, sql) });
     }
     if (request.method === "GET" && match) {
       const id = decodeURIComponent(match[1]),
@@ -373,4 +372,31 @@ export async function handle(request: Request, env: Env): Promise<Response> {
     return fail("provider_error", "The request could not be completed.", 500);
   }
 }
-export default { fetch: handle };
+async function cleanup(row: Row, env: Env, sql: D1Executor, fetcher: typeof fetch = fetch.bind(globalThis)): Promise<ProviderCleanup> {
+  if (row.cleanup_status === 'deleted') return 'deleted';
+  let status: ProviderCleanup = row.mode === 'mock' ? 'not_applicable' :
+    row.provider_task_id ? 'pending' : row.cleanup_status === 'not_applicable' || !row.submit_started ? 'not_applicable' : 'unknown_task';
+  if (status === 'pending') {
+    await sql.run("UPDATE jobs SET cleanup_attempts=cleanup_attempts+1,cleanup_last_attempt_at=? WHERE id=?", [new Date().toISOString(), row.id]);
+    try {
+      if (!env.YOUCAM_API_KEY) throw Error('Cleanup credentials unavailable');
+      await new LiveAdapter(env.YOUCAM_API_KEY, fetcher).deleteTask(row.provider_task_id!);
+      status = 'deleted';
+    } catch { status = 'failed'; }
+  }
+  await sql.run("UPDATE jobs SET cleanup_status=?,provider_task_id=CASE WHEN ? IN ('deleted','not_applicable') THEN NULL ELSE provider_task_id END WHERE id=?", [status, status, row.id]);
+  return status;
+}
+export async function scheduled(_event: unknown, env: Env, _ctx?: unknown, fetcher: typeof fetch = fetch.bind(globalThis)) {
+  const sql = new D1Executor(env.DB);
+  const rows = await sql.all<Row>(`SELECT * FROM jobs WHERE (created_at<=? OR id IN (SELECT id FROM deleted_jobs))
+    AND cleanup_status NOT IN ('deleted','not_applicable') AND (cleanup_status!='unknown_task' OR provider_task_id IS NOT NULL) ORDER BY cleanup_last_attempt_at,created_at LIMIT 20`, [new Date(Date.now()-1800000).toISOString()]);
+  for (const row of rows) {
+    await sql.run("INSERT OR IGNORE INTO deleted_jobs(id) VALUES(?)", [row.id]);
+    results.delete(row.id);
+    const table = row.mode === 'mock' ? 'mock_reservations' : 'reservations';
+    await sql.run(`UPDATE ${table} SET status='abandoned' WHERE id=? AND status='reserved'`, [row.id]);
+    await cleanup(row, env, sql, fetcher);
+  }
+}
+export default { fetch: handle, scheduled };

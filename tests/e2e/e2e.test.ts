@@ -20,7 +20,7 @@ beforeAll(async () => {
   const bundle = await build({ entryPoints: ['worker.ts'], bundle: true, write: false, format: 'esm', platform: 'browser' });
   mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-05-03', d1Databases: ['DB'], bindings: { YOUCAM_MODE: 'mock', IP_HASH_SECRET: 'synthetic-local-test-salt' }, outboundService: () => { throw new Error('External network forbidden'); } });
   const db = await mf.getD1Database('DB');
-  for (const name of ['0001.sql', '0002.sql']) {
+  for (const name of ['0001.sql', '0002.sql', '0003.sql']) {
     const sql = readFileSync(new URL(`../../service/migrations/${name}`, import.meta.url), 'utf8');
     for (const statement of sql.replace(/--[^\n]*/g, '').split(';').filter(s => s.trim())) await db.prepare(statement).run();
   }
@@ -99,8 +99,7 @@ it('self-reported severe symptoms retain the v2 referral', () => {
 it('DELETE removes results; GET and second DELETE return uniform not_found', async () => {
   await api.delete(id);
   await expect(api.get(id)).rejects.toMatchObject({ code: 'not_found' });
-  await expect(api.delete(id)).rejects.toMatchObject({ code: 'not_found' });
-  await expect(api.delete(id)).rejects.toBeInstanceOf(AnalysisError);
+  await expect(api.delete(id)).resolves.toEqual({ local: 'deleted', provider: 'not_applicable' });
 });
 it.each([false, true])('real worker attempts provider task/delete; failure=%s still deletes locally', async fails => {
   const calls: { url: string; method: string; body: unknown }[] = [];
@@ -110,16 +109,16 @@ it.each([false, true])('real worker attempts provider task/delete; failure=%s st
   } });
   try {
     const db = await provider.getD1Database('DB');
-    for (const name of ['0001.sql', '0002.sql']) {
+    for (const name of ['0001.sql', '0002.sql', '0003.sql']) {
       const sql = readFileSync(new URL(`../../service/migrations/${name}`, import.meta.url), 'utf8');
       for (const statement of sql.replace(/--[^\n]*/g, '').split(';').filter(s => s.trim())) await db.prepare(statement).run();
     }
     // Seed a provider-backed job so this cleanup test cannot submit a paid task.
     const now = new Date().toISOString();
     await db.prepare('INSERT INTO jobs(id,state,mode,created_at,updated_at,session_id,provider_task_id) VALUES(?,?,?,?,?,?,?)').bind('cleanup', 'running', 'live', now, now, 'synthetic', 'synthetic-provider-task').run();
-    expect((await provider.dispatchFetch('http://local/api/analyses/cleanup', { method: 'DELETE' })).status).toBe(204);
+    expect((await provider.dispatchFetch('http://local/api/analyses/cleanup', { method: 'DELETE' })).status).toBe(200);
     expect(calls).toEqual([{ url: 'https://yce-api-01.makeupar.com/s2s/v2.0/task/delete', method: 'POST', body: { task_id: 'synthetic-provider-task' } }]);
-    for (const method of ['GET', 'DELETE']) {
+    for (const method of ['GET']) {
       const response = await provider.dispatchFetch('http://local/api/analyses/cleanup', { method });
       expect(response.status).toBe(404);
       expect(await response.json()).toMatchObject({ error: { code: 'not_found', retryable: false } });

@@ -1,3 +1,5 @@
+import { run2Masks } from '../../service/fixtures/run2-masks';
+import { CONSENT_TEXT } from '../../contracts';
 import { it, expect, vi, afterEach } from '../../web/node_modules/vitest';
 import { SAMPLE } from '../../web/src/sample';
 import { serializeLog } from '../../web/src/log-file';
@@ -10,8 +12,9 @@ it('runs full mocked upload, derives regions, downloads numbers and deletes anal
     vi.useFakeTimers();
     vi.resetModules();
     document.body.innerHTML = '<div id="app"></div>';
-    const result: GetAnalysisResponse = { job: { id: 'mock-job', state: 'succeeded', mode: 'mock', source: 'mock', createdAt: 'now', updatedAt: 'now' }, observations: SAMPLE.observations.map(o => ({ ...o, source: 'mock' })), zoneLabels: SAMPLE.zoneLabels.map(z => ({ ...z, source: 'mock' })), masks: { acne: 'data:image/png;base64,AA==', redness: 'data:image/png;base64,AA==', t_zone: 'data:image/png;base64,AA==', u_zone: 'data:image/png;base64,AA==' } };
-    const fetcher = vi.fn().mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(init?.method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json(init?.method === 'POST' ? { job: result.job, deduplicated: false } : result)));
+    const result: GetAnalysisResponse = { job: { id: 'mock-job', state: 'succeeded', mode: 'mock', source: 'mock', createdAt: 'now', updatedAt: 'now' }, observations: SAMPLE.observations.map(o => ({ ...o, source: 'mock' })), zoneLabels: SAMPLE.zoneLabels.map(z => ({ ...z, source: 'mock' })), masks: { ...run2Masks } };
+    let cleanupAttempts = 0;
+    const fetcher = vi.fn().mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(init?.method === 'DELETE' ? Response.json({ local: 'deleted', provider: ++cleanupAttempts === 1 ? 'failed' : 'deleted' }) : Response.json(init?.method === 'POST' ? { job: result.job, deduplicated: false } : result)));
     vi.stubGlobal('fetch', fetcher);
     vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 600, height: 800, close: vi.fn() }));
     const pixels = new Uint8ClampedArray(600 * 800 * 4);
@@ -26,6 +29,7 @@ it('runs full mocked upload, derives regions, downloads numbers and deletes anal
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => { });
     await import('../../web/src/main');
     const click = (id: string) => (document.getElementById(id) as HTMLButtonElement).click();
+    expect(document.querySelector('#consent label')!.textContent).toBe(CONSENT_TEXT);
     click('agree');
     click('continue');
     click('add-change');
@@ -41,16 +45,28 @@ it('runs full mocked upload, derives regions, downloads numbers and deletes anal
     const text = document.getElementById('results')!.textContent!;
     for (const value of ['Your breakout log', 'acne: 66', 'Oily', 'Region stats', 'Estimated by this app from the YouCam mask, not a YouCam measurement', 'Still missing', 'cannot tell which product', 'Mock (test data)', 'please see a dermatologist'])
         expect(text).toContain(value);
+    click('severe');
+    (document.querySelector('[aria-label="Category"]') as HTMLInputElement).value = 'updated serum';
+    (document.getElementById('discomfort') as HTMLTextAreaElement).value = 'edited after analysis';
     click('download');
+    expect(document.getElementById('results')!.textContent).not.toContain('please see a dermatologist');
+    expect(document.getElementById('results')!.textContent).toContain('updated serum');
     expect(downloaded).toBeDefined();
     vi.useRealTimers();
     const encoded = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(downloaded!); });
     expect(encoded).not.toMatch(/data:|https?:|"image"|"masks"/i);
     const parsed = JSON.parse(encoded);
+    expect(parsed.selfReport.discomfort).toBe('edited after analysis');
+    expect(parsed.changes[0].category).toBe('updated serum');
     expect(parsed.entries[0].regions.zones[0].acneSpots).toBe(1);
     expect(serializeLog(parsed)).toBeTruthy();
     click('delete');
     expect(fetcher).toHaveBeenLastCalledWith('/api/analyses/mock-job', { method: 'DELETE', keepalive: true });
+    await vi.waitFor(() => expect(document.getElementById('status')!.textContent).toContain('Deleted here. Perfect Corp. cleanup: failed'));
+    expect(document.getElementById('retry-delete')!.hidden).toBe(false);
+    click('retry-delete');
+    await vi.waitFor(() => expect(document.getElementById('status')!.textContent).toContain('cleanup: deleted'));
+    expect(document.getElementById('retry-delete')!.hidden).toBe(true);
     click('clear');
     expect(document.getElementById('results')!.textContent).toBe('');
 });
@@ -108,4 +124,12 @@ it.each([false, true])('comparison requires same-framing confirmation: %s', asyn
         expect(root.textContent).toContain('Confirm the same framing for both entries first.');
         expect(root.textContent).not.toContain('acne: 66 | 71');
     }
+});
+it('rejects oversized PNG dimensions before browser decoding', async () => {
+    const { decodeMask } = await import('../../web/src/regions-browser');
+    const bytes = Uint8Array.from(atob(run2Masks.acne!.split(',')[1]!), c => c.charCodeAt(0));
+    bytes[16] = 127;
+    const decode = vi.fn(); vi.stubGlobal('createImageBitmap', decode);
+    await expect(decodeMask('data:image/png;base64,' + btoa(String.fromCharCode(...bytes)))).rejects.toThrow('dimensions');
+    expect(decode).not.toHaveBeenCalled();
 });

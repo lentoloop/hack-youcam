@@ -94,15 +94,18 @@ export class D1BudgetGuard implements BudgetGuard {
   }
   async commit(id: string) {
     await this.sql.run(
-      "UPDATE reservations SET status='spent' WHERE id=? AND status='reserved'",
+      "UPDATE reservations SET status='spent' WHERE id=? AND status IN ('reserved','abandoned')",
       [id],
     );
   }
   async release(id: string) {
     await this.sql.run(
-      "UPDATE reservations SET status='released' WHERE id=? AND status='reserved'",
+      "UPDATE reservations SET status='released' WHERE id=? AND status IN ('reserved','abandoned')",
       [id],
     );
+  }
+  async abandon(id: string) {
+    await this.sql.run("UPDATE reservations SET status='abandoned' WHERE id=? AND status='reserved'", [id]);
   }
   async status(): Promise<BudgetStatus> {
     const rows = await this.sql.all<{
@@ -175,11 +178,15 @@ export class MemoryBudgetGuard implements BudgetGuard {
   }
   async commit(id: string) {
     const r = this.rows.find((x) => x.id === id);
-    if (r?.status === "reserved") r.status = "spent";
+    if (r && ["reserved", "abandoned"].includes(r.status)) r.status = "spent";
   }
   async release(id: string) {
     const r = this.rows.find((x) => x.id === id);
-    if (r?.status === "reserved") r.status = "released";
+    if (r && ["reserved", "abandoned"].includes(r.status)) r.status = "released";
+  }
+  async abandon(id: string) {
+    const r = this.rows.find(x => x.id === id);
+    if (r?.status === 'reserved') r.status = 'abandoned';
   }
   async status(): Promise<BudgetStatus> {
     const s: BudgetStatus = {

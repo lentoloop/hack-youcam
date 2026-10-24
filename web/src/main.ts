@@ -1,4 +1,4 @@
-import { CONSENT_TEXT_VERSION, type ConsentRecord } from '../../contracts/analysis';
+import { CONSENT_TEXT, CONSENT_TEXT_VERSION, type ConsentRecord } from '../../contracts/analysis';
 import type { BreakoutLog, ProductChange } from '../../contracts/log';
 import { createApi, AnalysisError } from './api';
 import { prepareImage } from './image';
@@ -10,19 +10,29 @@ import { regionsFromMasks } from './regions-browser';
 import { downloadLog, importLog } from './log-file';
 import './style.css';
 const api = createApi(), root = document.querySelector<HTMLElement>('#app')!;
-root.innerHTML = `<header>Breakout Log (working title)</header><main><h1>Make room for the facts.</h1><p>Record product changes and cosmetic appearance observations to bring to a professional.</p><section id="consent"><h2>Your face, your choice</h2><label><input id="agree" type="checkbox">I have permission to upload this face to Perfect Corp. for cosmetic analysis. Perfect Corp. keeps uploaded files for up to 30 days and result links expire after 2 hours. This app keeps results in memory for at most 30 minutes, deletes them when you leave, and your downloaded log contains numbers only, no photo. This is not medical advice.</label><p>Consent version: ${CONSENT_TEXT_VERSION}</p><button id="continue" disabled>Continue to photo</button></section><section id="capture" hidden>${captureGuide}<label>Take a selfie<input id="camera" type="file" accept="image/*" capture="user"></label><label>Or upload a photo<input id="upload" type="file" accept="image/*"></label><p id="photo-status"></p><label>Judge access code (optional)<input id="judge" type="password" autocomplete="off"></label><section id="report"><h2>Your own account</h2><label>Areas<input id="areas"></label><label>Discomfort<textarea id="discomfort"></textarea></label><label><input id="severe" type="checkbox">Painful, swollen or spreading breakouts</label><h2>Recent product changes</h2><p>Active means an active ingredient such as a retinoid, acid or BPO.</p><div class="table-scroll"><table><thead><tr><th>Category</th><th>Started on</th><th>Contains active?</th><th>Note</th><th></th></tr></thead><tbody id="changes"></tbody></table></div><button id="add-change">Add product change</button></section><button id="analyze" disabled>Analyze and add entry</button></section><button id="sample">Try Sample (pre-analyzed)</button><p>Sample uses pre-analyzed run2 scores; no upload or API call.</p><section id="status" role="status" aria-live="polite"></section><button id="resume" hidden>Resume existing job</button><section id="results"></section><button id="download" disabled>Download log</button><label>Import log<input id="import" type="file" accept="application/json,.json"></label><button id="clear">Clear log</button><button id="delete">Delete my analysis</button><footer>Appearance records only. No diagnosis. Session expires after 30 minutes.</footer></main>`;
+root.innerHTML = `<header>Breakout Log (working title)</header><main><h1>Make room for the facts.</h1><p>Record product changes and cosmetic appearance observations to bring to a professional.</p><section id="consent"><h2>Your face, your choice</h2><label><input id="agree" type="checkbox">${CONSENT_TEXT}</label><p>Consent version: ${CONSENT_TEXT_VERSION}</p><button id="continue" disabled>Continue to photo</button></section><section id="capture" hidden>${captureGuide}<label>Take a selfie<input id="camera" type="file" accept="image/*" capture="user"></label><label>Or upload a photo<input id="upload" type="file" accept="image/*"></label><p id="photo-status"></p><label>Judge access code (optional)<input id="judge" type="password" autocomplete="off"></label><section id="report"><h2>Your own account</h2><label>Areas<input id="areas"></label><label>Discomfort<textarea id="discomfort"></textarea></label><label><input id="severe" type="checkbox">Painful, swollen or spreading breakouts</label><h2>Recent product changes</h2><p>Active means an active ingredient such as a retinoid, acid or BPO.</p><div class="table-scroll"><table><thead><tr><th>Category</th><th>Started on</th><th>Contains active?</th><th>Note</th><th></th></tr></thead><tbody id="changes"></tbody></table></div><button id="add-change">Add product change</button></section><button id="analyze" disabled>Analyze and add entry</button></section><button id="sample">Try Sample (pre-analyzed)</button><p>Sample uses pre-analyzed run2 scores; no upload or API call.</p><section id="status" role="status" aria-live="polite"></section><button id="resume" hidden>Resume existing job</button><section id="results"></section><button id="download" disabled>Download log</button><label>Import log<input id="import" type="file" accept="application/json,.json"></label><button id="clear">Clear log</button><button id="retry-delete" hidden>Retry cleanup</button><button id="delete">Delete my analysis</button><footer>Appearance records only. No diagnosis. Session expires after 30 minutes.</footer></main>`;
 const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const fresh = (): BreakoutLog => ({ version: 'breakout-log.v1', createdAt: new Date().toISOString(), changes: [], selfReport: { areas: '', discomfort: '', reportedSevereSymptom: false }, entries: [] });
 let log = fresh(), consent: ConsentRecord | undefined, sessionId = crypto.randomUUID(), jobId: string | undefined, stopPoll: (() => void) | undefined, generation = 0, expires: ReturnType<typeof setTimeout> | undefined, pending: File | undefined, submittedFraming = false, submittedAt = '';
 const recordedJobs = new Set<string>();
+const cleanupIds = new Set<string>();
 function error(e: unknown) { get('status').textContent = e instanceof Error ? e.message : 'Connection failed.'; get('resume').hidden = !jobId; if (e instanceof AnalysisError && e.code === 'not_found') {
-    jobId = undefined;
+    deleteCurrent();
     get('resume').hidden = true;
 } }
 function armExpiry() { if (!expires)
     expires = setTimeout(clear, 30 * 60 * 1000); }
-function deleteCurrent() { const id = jobId; jobId = undefined; if (id)
-    void api.delete(id).catch(error); }
+async function deleteCurrent(id = jobId) { if (!id) return;
+    cleanupIds.add(id);
+    try {
+        const result = await api.delete(id);
+        get('status').textContent = `Deleted here. Perfect Corp. cleanup: ${result.provider}. Uploaded files follow Perfect Corp.'s 30-day retention.`;
+        get('retry-delete').hidden = !['failed', 'pending'].includes(result.provider);
+        if (!['failed', 'pending'].includes(result.provider)) { cleanupIds.delete(id); if (jobId === id) jobId = undefined; }
+        get('retry-delete').hidden = cleanupIds.size === 0;
+    } catch (e) { get('retry-delete').hidden = false; get('status').textContent = e instanceof Error ? e.message : 'Cleanup request failed. Retry cleanup.'; }
+}
+get('retry-delete').onclick = () => { for (const id of cleanupIds) void deleteCurrent(id); };
 function render() { renderResults(get('results'), log); get<HTMLButtonElement>('download').disabled = false; }
 function clear() { generation++; stopPoll?.(); deleteCurrent(); clearTimeout(expires); expires = undefined; log = fresh(); recordedJobs.clear(); consent = undefined; pending = undefined; sessionId = crypto.randomUUID(); get('results').replaceChildren(); get('capture').hidden = true; get('consent').hidden = false; get<HTMLInputElement>('agree').checked = false; get<HTMLButtonElement>('continue').disabled = true; get<HTMLButtonElement>('download').disabled = true; get<HTMLButtonElement>('analyze').disabled = true; get('resume').hidden = true; get('changes').replaceChildren(); for (const id of ['camera', 'upload', 'judge', 'areas', 'discomfort', 'import'])
     get<HTMLInputElement>(id).value = ''; for (const id of ['severe', 'framing'])
@@ -32,7 +42,7 @@ function readReport() { log.selfReport = { areas: get<HTMLInputElement>('areas')
 get('add-change').onclick = () => addChange();
 get('clear').onclick = clear;
 window.addEventListener('pagehide', clear);
-get('delete').onclick = () => { generation++; stopPoll?.(); deleteCurrent(); get('resume').hidden = true; get('status').textContent = 'Analysis deletion requested. Your numbers-only log remains until cleared.'; };
+get('delete').onclick = () => { generation++; stopPoll?.(); deleteCurrent(); get('resume').hidden = true; get('status').textContent = 'Analysis deletion requested. Your downloaded record remains until cleared.'; };
 get<HTMLInputElement>('agree').onchange = () => { get<HTMLButtonElement>('continue').disabled = !get<HTMLInputElement>('agree').checked; };
 get('continue').onclick = () => { consent = { granted: true, textVersion: CONSENT_TEXT_VERSION, acceptedAt: new Date().toISOString() }; armExpiry(); get('consent').hidden = true; get('capture').hidden = false; };
 for (const id of ['camera', 'upload'])
@@ -91,6 +101,8 @@ finally {
 get('sample').onclick = () => { generation++; stopPoll?.(); deleteCurrent(); get('resume').hidden = true; armExpiry(); readReport(); if (!log.entries.some(e => e.id === SAMPLE.id))
     log.entries.push(structuredClone(SAMPLE)); get('status').textContent = 'Sample (pre-analyzed), not a live analysis.'; render(); };
 get('download').onclick = () => { try {
+    readReport();
+    render();
     downloadLog(log);
 }
 catch (e) {

@@ -7,3 +7,14 @@ it('includes all unknown codes, orders timeline and selects earliest live baseli
 it('validates strict files and rejects unsafe nested content, dates, size and fields', () => { expect(parseLogFile(fixture()).ok).toBe(true); for (const change of [{ version: 'v2' }, { photo: 'x' }, { selfReport: { ...fixture().selfReport, areas: 'data:image/png;base64,x' } }, { selfReport: { ...fixture().selfReport, discomfort: 'https://example.com' } }, { selfReport: { ...fixture().selfReport, areas: 'http://example.com' } }, { createdAt: '2026-02-30T00:00:00Z' }, { entries: [{ ...SAMPLE, image: 'anything' }] }, { changes: [{ id: 'c', category: 'a', active: 'yes', startedOn: '2026-02-30' }] }, { selfReport: { ...fixture().selfReport, areas: 'x'.repeat(205000) } }])
     expect(parseLogFile({ ...fixture(), ...change }).ok).toBe(false); });
 it('refuses framing and size differences; returns side-by-side scores only', () => { const a = structuredClone(SAMPLE), b = structuredClone(SAMPLE); expect(compareEntries(a, b)).toHaveProperty('refused'); a.framing.userConfirmedSameFraming = b.framing.userConfirmedSameFraming = true; expect(compareEntries(a, b)).toHaveProperty('rows'); b.framing.imageSize.w = 480; expect(compareEntries(a, b)).toHaveProperty('refused'); b.framing.imageSize.w = 600; const regions = { method: 'mask-heuristic.v1' as const, imageSize: { w: 600 as const, h: 800 as const }, zones: [] }; a.regions = structuredClone(regions); b.regions = structuredClone(regions); expect(compareEntries(a, b)).toHaveProperty('zones'); Object.assign(b.regions, { method: 'other' }); expect(compareEntries(a, b)).toHaveProperty('refused'); });
+
+it.each(['iVBORw0KGgo', '/9j/', 'A'.repeat(200), 'x'.repeat(501)])('rejects encoded or oversized text %s', value => {
+  const log = fixture(); log.selfReport.discomfort = value;
+  expect(parseLogFile(log).ok).toBe(false);
+});
+it('limits categories, notes and identifiers', () => {
+  for (const [key, count] of [['category',81], ['note',501], ['id',65]] as const) {
+    const log = fixture(); log.changes = [{ id:'c', category:'cream', note:'', startedOn:'2026-10-01', active:'unknown', [key]: 'x'.repeat(count) }];
+    expect(parseLogFile(log).ok).toBe(false);
+  }
+});

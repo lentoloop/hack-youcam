@@ -16,6 +16,7 @@ async function log(endpoint, status, units = 0, before = balance, note = "") {
 async function wrapped(input, init = {}) {
   const url = new URL(String(input));
   const provider = url.origin === host;
+  if (!provider) console.log("storage-host=" + url.hostname);
   const path = provider ? url.pathname : "mask-or-upload";
   const method = init.method ?? "GET";
   const endpoint = `${method} ${path.startsWith(taskPath + "/") ? taskPath + "/[task_id]" : path}`;
@@ -23,6 +24,7 @@ async function wrapped(input, init = {}) {
     if (created || !Number.isFinite(balance) || balance - 9 < 460) throw Error("Task allowance unavailable");
     created = true;
     outcome = "unresolved";
+    await log(endpoint, "intent", 0, balance, "task-submit");
   }
   const before = balance;
   let res;
@@ -59,7 +61,11 @@ async function main() {
   // Exclusive lock prevents concurrent operators from bypassing the two-run cap.
   lock = await open(ledger + ".breakout-lock", "wx");
   const lines = (await readFile(ledger, "utf8")).split("\n").filter(l => /\bstep=breakout-live\b/.test(l));
-  if (lines.filter(l => /\bunits_used=9\b/.test(l)).length >= 2) throw Error("Two paid runs already recorded");
+  const intents = lines.filter(l => /note=task-submit\b/.test(l)).length;
+  // Legacy runs have no intent line: count each historical charged success as a run.
+  const legacy = lines.filter(l => /\bunits_used=9\b/.test(l) && !lines.slice(0, lines.indexOf(l)).some(x => /note=task-submit\b/.test(x))).length;
+  if (intents + legacy >= 2) throw Error("Two task runs already recorded");
+  if (lines.some(l => /note=run-end-.*-cleanup-failed\b/.test(l))) throw Error("Prior cleanup failed; reconcile before another run");
   const starts = lines.filter(l => /note=run-start\b/.test(l)).length;
   const ends = lines.filter(l => /note=run-end-(success|task-error|pre-task-failure)\b/.test(l)).length;
   if (starts > ends) throw Error("Prior run unresolved; reconcile ledger before another run");
@@ -79,7 +85,7 @@ async function main() {
       if (result.state === "running") continue;
       if (result.state === "failed") throw Error("Analysis failed: " + result.code);
       const { observations, zoneLabels, masks } = result;
-      console.log(JSON.stringify({ observations, zoneLabels, maskBytes: Object.fromEntries(Object.entries(masks).map(([k,v]) => [k, Buffer.from(v.split(",")[1], "base64").length])) }));
+      console.log(JSON.stringify({ observations, maskBytes: Object.fromEntries(Object.entries(masks).map(([k,v]) => [k, Buffer.from(v.split(",")[1], "base64").length])) }));
       const output = resolve(process.env.OUT ?? "/workspace/eng/spikes/youcam-breakout-20261025/live-smoke/result.json");
       await mkdir(dirname(output), { recursive: true });
       await writeFile(output, JSON.stringify({ observations, zoneLabels, masks }, null, 2) + "\n", { mode: 0o600 });
@@ -88,10 +94,11 @@ async function main() {
     throw Error("Analysis timed out; no new task created");
   } finally {
     // Cleanup is attempted even after polling, output, or credit failures.
-    try { if (adapter && taskId) await adapter.deleteTask(taskId); }
+    let cleanup = created ? "failed" : "deleted";
+    try { if (adapter && taskId) { await adapter.deleteTask(taskId); cleanup = "deleted"; } }
     finally {
       if (created) { try { await credit(); } catch { process.exitCode = 1; } }
-      await log("LOCAL", "-", 0, balance, `run-end-${outcome}`);
+      await log("LOCAL", "-", 0, balance, `run-end-${outcome}-cleanup-${cleanup}`);
     }
   }
 }

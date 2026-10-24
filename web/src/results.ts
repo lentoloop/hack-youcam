@@ -32,6 +32,7 @@ export function renderResults(root: HTMLElement, log: BreakoutLog) {
         add('h4', 'Zone labels from YouCam');
         for (const z of e.zoneLabels)
             add('p', `${z.region}: ${z.label}`);
+        if (!e.regions) add('p', 'Region estimates unavailable: one or more masks are missing or invalid. Missing masks do not mean zero.');
         if (e.regions) {
             add('h4', 'Region stats');
             add('p', 'Estimated by this app from the YouCam mask, not a YouCam measurement');

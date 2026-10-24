@@ -14,6 +14,16 @@ for (const kind of ["memory", "sqlite"])
       kind === "memory"
         ? new MemoryBudgetGuard(now)
         : new D1BudgetGuard(database().sql, now);
+    it("abandon frees concurrency while holding units and permits later confirmation", async () => {
+      const g = make();
+      for (const n of [1,2]) { const r = await g.reserve(req(n)); if (!r.ok) throw Error(); await g.abandon(r.reservationId); }
+      expect((await g.status()).reservedUnits).toBe(18);
+      expect((await g.status()).remainingByPool.judge).toBe(450);
+      expect((await g.reserve(req(3, 'judge'))).ok).toBe(true);
+      const r = await g.reserve(req(1)); if (!r.ok) throw Error();
+      await g.release(r.reservationId);
+      expect((await g.status()).remainingByPool.public).toBe(171);
+    });
     it("dedupes session hash", async () => {
       const g = make();
       const a = await g.reserve(req(1));

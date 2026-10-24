@@ -1,3 +1,4 @@
+import { validMaskHeader } from "../shared/png";
 import { run2Masks } from "./fixtures/run2-masks";
 import {
   CONCERNS,
@@ -61,6 +62,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
   constructor(
     private key: string,
     private fetcher: typeof fetch = fetch.bind(globalThis),
+    private storageSuffixes = "",
   ) {}
   private async api(path: string, body?: unknown): Promise<any> {
     const res = await this.fetcher(HOST + path, {
@@ -101,7 +103,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
           502,
         );
       const url = new URL(instruction.url);
-      if (url.protocol !== "https:")
+      if (!validStorageUrl(url, this.storageSuffixes))
         throw new ServiceError(
           "provider_error",
           "Invalid upload destination.",
@@ -109,6 +111,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
         );
       const upload = await this.fetcher(url, {
         method: instruction.method ?? "PUT",
+        redirect: "error",
         headers: instruction.headers ?? { "Content-Type": "image/jpeg" },
         body: image.bytes as BodyInit,
         signal: AbortSignal.timeout(20000),
@@ -146,7 +149,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
   }
   private async downloadMask(value: unknown): Promise<string | undefined> {
     try {
-      if (typeof value !== "string" || new URL(value).protocol !== "https:") return;
+      if (typeof value !== "string" || !validStorageUrl(new URL(value), this.storageSuffixes)) return;
       const response = await this.fetcher(value, {
         signal: AbortSignal.timeout(10000), redirect: "error",
       });
@@ -171,7 +174,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
       const bytes = new Uint8Array(size);
       let offset = 0;
       for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-      if (![137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes[i] === b)) return;
+      if (!validMaskHeader(bytes)) return;
       let binary = "";
       for (let i = 0; i < bytes.length; i += 8192)
         binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
@@ -243,5 +246,12 @@ export function createAdapter(
       "Live analysis is unavailable.",
       503,
     );
-  return new LiveAdapter(env.YOUCAM_API_KEY, fetcher);
+  return new LiveAdapter(env.YOUCAM_API_KEY, fetcher, (env as AdapterEnv & { YOUCAM_STORAGE_HOST_SUFFIXES?: string }).YOUCAM_STORAGE_HOST_SUFFIXES);
+}
+
+export function validStorageUrl(url: URL, suffixes = ""): boolean {
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || host.includes(':') || /^[\d.]+$/.test(host) || !host.includes('.') || /\.(localhost|local|internal|test|invalid)$/.test(host)) return false;
+  const allowed = suffixes.split(',').map(s => s.trim().toLowerCase().replace(/^\./, '')).filter(Boolean);
+  return !allowed.length || allowed.some(s => host === s || host.endsWith('.'+s));
 }

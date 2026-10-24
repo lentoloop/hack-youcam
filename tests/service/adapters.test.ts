@@ -3,6 +3,7 @@ import {
   LiveAdapter,
   MockAdapter,
   createAdapter,
+  validStorageUrl,
 } from "../../service/adapters";
 import { jpegDimensions, normalizeImage } from "../../service/image";
 import { jpeg } from "./helpers";
@@ -81,6 +82,7 @@ describe("adapters and image validation", () => {
       observations: [{ rawScore: 75, source: "live" }],
     });
     expect(calls[1].init.method).toBe("PUT");
+    expect(calls[1].init.redirect).toBe("error");
     expect(calls[1].init.headers).toEqual({ "Content-Length": String(image.bytes.length), "Content-Type": "image/jpeg" });
     expect(JSON.parse(calls[0].init.body)).toEqual({ files: [{ content_type: "image/jpeg", file_name: "capture.jpg", file_size: image.bytes.length }] });
     expect(JSON.parse(calls[2].init.body).format).toBe("json");
@@ -237,4 +239,29 @@ it("ignores invalid scores, unknown regions, and scored skin_type", async () => 
     { concern: "texture", rawScore: 1, source: "live" },
     { concern: "acne", rawScore: 100, uiScore: 1, source: "live" },
   ], zoneLabels: [], masks: {} });
+});
+
+it.each(['http://cdn.example/x', 'https://127.0.0.1/x', 'https://[::1]/x', 'https://user:pass@cdn.example/x', 'https://cdn.example:444/x', 'https://localhost/x', 'https://a.internal/x'])('rejects unsafe storage destination %s', url => {
+  expect(validStorageUrl(new URL(url))).toBe(false);
+});
+it('bounds suffix matches to host labels', () => {
+  expect(validStorageUrl(new URL('https://cdn.example/x'), 'example')).toBe(true);
+  expect(validStorageUrl(new URL('https://badexample/x'), 'example')).toBe(false);
+  expect(validStorageUrl(new URL('https://other.example/x'), 'approved.example')).toBe(false);
+});
+it.each(['truncated', 'huge', 'rgb'])('omits a bad IHDR before returning mask: %s', async kind => {
+  const a = new LiveAdapter('fake', (async url => {
+    if (String(url).includes('/skin-analysis/')) return Response.json(sample());
+    const token = String(url).split('/').pop()!;
+    const bytes = png(token);
+    if (token === 'URL_4') {
+      if (kind === 'truncated') return new Response(bytes.slice(0,8));
+      if (kind === 'huge') bytes[16] = 127;
+      if (kind === 'rgb') bytes[25] = 2;
+    }
+    return new Response(bytes);
+  }) as typeof fetch);
+  const result = await a.poll('t');
+  expect(result).toMatchObject({state:'succeeded', masks:{redness:run2Masks.redness}});
+  if (result.state === 'succeeded') expect(result.masks.acne).toBeUndefined();
 });

@@ -3,6 +3,7 @@ import {
   DELETE_ANALYSIS_ROUTE,
   type AnalysisErrorCode,
   type ApiError,
+  type DeleteAnalysisResponse,
   type CreateAnalysisMeta,
   type CreateAnalysisResponse,
   type GetAnalysisResponse,
@@ -61,7 +62,7 @@ export function createApi(fetcher: typeof fetch = fetch) {
       });
     },
     delete(id: string) {
-      return request<void>(DELETE_ANALYSIS_ROUTE(id), { method: "DELETE", keepalive: true });
+      return request<DeleteAnalysisResponse>(DELETE_ANALYSIS_ROUTE(id), { method: "DELETE", keepalive: true });
     },
     get(id: string) {
       return request<GetAnalysisResponse>(API_ROUTES.getAnalysis(id));

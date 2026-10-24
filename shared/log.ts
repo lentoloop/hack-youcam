@@ -28,12 +28,12 @@ export const buildLog: BuildLog = log => {
 export const parseLogFile: ParseLogFile = json => {
     try {
         const encoded = JSON.stringify(json);
-        if (!encoded || encodeURIComponent(encoded).replace(/%[A-F\d]{2}/gi, 'x').length > 200 * 1024 || /data:|https?:/i.test(encoded))
+        if (!encoded || encodeURIComponent(encoded).replace(/%[A-F\d]{2}/gi, 'x').length > 200 * 1024 || /data:|https?:|iVBORw0KGgo|\/9j\/|[A-Za-z0-9+\/]{200,}/i.test(encoded))
             throw Error('Unsafe or oversized log.');
         const obj = (x: unknown, required: string[], optional: string[] = []) => { if (!x || typeof x !== 'object' || Array.isArray(x))
             throw Error('Expected object.'); const r = x as Record<string, unknown>; if (required.some(k => !(k in r)) || Object.keys(r).some(k => !required.includes(k) && !optional.includes(k)))
             throw Error('Unexpected fields.'); return r; };
-        const str = (x: unknown): x is string => typeof x === 'string';
+        const str = (x: unknown, max = 500): x is string => typeof x === 'string' && x.length <= max;
         const num = (x: unknown) => typeof x === 'number' && Number.isFinite(x) && x >= 0;
         const arr = (x: unknown) => { if (!Array.isArray(x))
             throw Error('Expected array.'); return x; };
@@ -48,12 +48,12 @@ export const parseLogFile: ParseLogFile = json => {
             throw Error('Invalid self report.');
         for (const c of arr(r.changes)) {
             const v = obj(c, ['id', 'category', 'startedOn', 'active'], ['note']);
-            if (!str(v.id) || !str(v.category) || !str(v.startedOn) || !day(v.startedOn) || !['yes', 'no', 'unknown'].includes(v.active as string) || ('note' in v && !str(v.note)))
+            if (!str(v.id, 64) || !str(v.category, 80) || !str(v.startedOn) || !day(v.startedOn) || !['yes', 'no', 'unknown'].includes(v.active as string) || ('note' in v && !str(v.note)))
                 throw Error('Invalid product change.');
         }
         for (const e of arr(r.entries)) {
             const v = obj(e, ['id', 'date', 'source', 'observations', 'zoneLabels', 'framing'], ['regions']);
-            if (!str(v.id) || !iso(v.date) || !source(v.source))
+            if (!str(v.id, 64) || !iso(v.date) || !source(v.source))
                 throw Error('Invalid entry.');
             const f = obj(v.framing, ['guideShown', 'userConfirmedSameFraming', 'imageSize']);
             if (f.guideShown !== true || typeof f.userConfirmedSameFraming !== 'boolean' || !size(f.imageSize))
