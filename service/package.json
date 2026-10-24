@@ -3,13 +3,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "vitest run --config ../tests/e2e/vitest.config.ts",
+    "dev": "node dev.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250101.0",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^22.0.0",
     "better-sqlite3": "11.10.0",
+    "esbuild": "^0.28.2",
+    "jpeg-js": "^0.4.4",
+    "jsdom": "^29.1.1",
+    "miniflare": "^4.20260426.0",
     "typescript": "^5.6.3",
     "vitest": "^4.1.12"
   }

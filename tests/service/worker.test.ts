@@ -170,3 +170,38 @@ it("mock runs consume only the mock ledger", async () => {
     count: 0,
   });
 });
+it.each([false, true])('deletes completed=%s jobs and preserves accounting', async (completed) => {
+  vi.useFakeTimers();
+  const e = env();
+  const created: any = await (await handle(request(), e)).json();
+  const url = 'https://local/api/analyses/' + created.job.id;
+  if (completed) { vi.advanceTimersByTime(10001); await handle(new Request(url), e); }
+  const query = () => e.DB.prepare('SELECT * FROM mock_reservations').bind().all();
+  const before = await query();
+  expect((await handle(new Request(url, { method: 'DELETE' }), e)).status).toBe(204);
+  expect(await query()).toEqual(before);
+  for (const method of ['GET', 'DELETE']) {
+    const response = await handle(new Request(url, { method }), e);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: 'not_found', message: expect.any(String), retryable: false } });
+  }
+  expect((await handle(new Request('https://local/api/analyses/unknown', { method: 'DELETE' }), e)).status).toBe(404);
+});
+it('does not restore observations when a poll finishes after DELETE', async () => {
+  vi.useFakeTimers();
+  const { MockAdapter } = await import('../../service/adapters');
+  let resolve!: (value: any) => void;
+  const poll = vi.spyOn(MockAdapter.prototype, 'poll').mockImplementation(() => new Promise(r => { resolve = r; }));
+  try {
+    const e = env();
+    const created: any = await (await handle(request(), e)).json();
+    const url = 'https://local/api/analyses/' + created.job.id;
+    vi.advanceTimersByTime(10001);
+    const pending = handle(new Request(url), e);
+    await vi.waitFor(() => expect(poll).toHaveBeenCalled());
+    expect((await handle(new Request(url, { method: 'DELETE' }), e)).status).toBe(204);
+    resolve({ state: 'succeeded', observations: [{ concern: 'moisture', rawScore: 40, source: 'mock' }] });
+    expect((await pending).status).toBe(404);
+    expect((await handle(new Request(url), e)).status).toBe(404);
+  } finally { poll.mockRestore(); }
+});

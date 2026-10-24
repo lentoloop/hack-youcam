@@ -19,7 +19,7 @@ export function renderResults(
 ) {
   if (observations.some((o) => o.source === "sample")) {
     root.innerHTML =
-      '<div class="sample-silhouette" role="img" aria-label="Placeholder silhouette, not a real face"><span></span></div>';
+      '<div class="sample-silhouette" role="img" aria-label="Synthetic silhouette, not a real face"><span></span></div>';
   } else {
     root.replaceChildren();
   }
@@ -103,6 +103,8 @@ export function renderResults(
   };
   function update() {
     const result = decideFn(observations, goal, [...owned]);
+    cards.hidden = result.action === "see_dermatologist";
+    decision.dataset.action = result.action;
     decision.replaceChildren();
     const h = document.createElement("h2");
     h.textContent = titles[result.action];

@@ -110,3 +110,6 @@ export const API_ROUTES = {
 
 /** Suggested client poll interval and UI timeout. */
 export const POLLING = { intervalMs: 10_000, uiTimeoutMs: 120_000 } as const;
+
+/** DELETE /api/analyses/:id — 204, no body; unknown/deleted id: ApiError 404. */
+export const DELETE_ANALYSIS_ROUTE = API_ROUTES.getAnalysis;

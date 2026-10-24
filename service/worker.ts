@@ -261,10 +261,19 @@ export async function handle(request: Request, env: Env): Promise<Response> {
       );
     }
     const match = url.pathname.match(/^\/api\/analyses\/([^/]+)$/);
+    const deleted = async (id: string) => (await sql.all("SELECT id FROM deleted_jobs WHERE id=?", [id])).length > 0;
+    if (request.method === "DELETE" && match) {
+      const id = decodeURIComponent(match[1]);
+      const row = (await sql.all<Row>("SELECT * FROM jobs WHERE id=?", [id]))[0];
+      if (!row || await deleted(id)) return fail("not_found", "This session result has expired or does not exist.", 404);
+      await sql.run("INSERT OR IGNORE INTO deleted_jobs(id) VALUES(?)", [id]);
+      results.delete(id);
+      return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+    }
     if (request.method === "GET" && match) {
       const id = decodeURIComponent(match[1]),
         row = (await sql.all<Row>("SELECT * FROM jobs WHERE id=?", [id]))[0];
-      if (!row || Date.now() - Date.parse(row.created_at) >= 1800000)
+      if (!row || await deleted(id) || Date.now() - Date.parse(row.created_at) >= 1800000)
         return fail(
           "not_found",
           "This session result has expired or does not exist.",
@@ -299,7 +308,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
           const poll = await createAdapter(env).poll(row.provider_task_id!);
           if (poll.state === "succeeded") {
             await budget.commit(id);
-            results.set(id, {
+            if (!await deleted(id)) results.set(id, {
               expires: Date.parse(row.created_at) + 1800000,
               observations: poll.observations,
             });
@@ -324,6 +333,10 @@ export async function handle(request: Request, env: Env): Promise<Response> {
           await sql.run("UPDATE jobs SET error_code='timeout' WHERE id=?", [
             id,
           ]);
+        }
+        if (await deleted(id)) {
+          results.delete(id);
+          return fail("not_found", "This session result has expired or does not exist.", 404);
         }
         return json({
           job: job(

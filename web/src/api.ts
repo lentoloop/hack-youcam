@@ -1,5 +1,6 @@
 import {
   API_ROUTES,
+  DELETE_ANALYSIS_ROUTE,
   type AnalysisErrorCode,
   type ApiError,
   type CreateAnalysisMeta,
@@ -46,6 +47,7 @@ export function createApi(fetcher: typeof fetch = fetch) {
           : "provider_error",
       );
     }
+    if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   }
   return {
@@ -57,6 +59,9 @@ export function createApi(fetcher: typeof fetch = fetch) {
         method: "POST",
         body,
       });
+    },
+    delete(id: string) {
+      return request<void>(DELETE_ANALYSIS_ROUTE(id), { method: "DELETE", keepalive: true });
     },
     get(id: string) {
       return request<GetAnalysisResponse>(API_ROUTES.getAnalysis(id));

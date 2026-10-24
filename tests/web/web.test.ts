@@ -174,7 +174,7 @@ it("runs sample without fetch and clears session data at 30 minutes", async () =
     );
     expect(
       document.querySelector(
-        '[aria-label="Placeholder silhouette, not a real face"]',
+        '[aria-label="Synthetic silhouette, not a real face"]',
       ),
     ).not.toBeNull();
     expect(network).not.toHaveBeenCalled();
@@ -187,5 +187,31 @@ it("runs sample without fetch and clears session data at 30 minutes", async () =
     document.body.replaceChildren();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  }
+});
+it.each(['click', 'pagehide'])('deletes with keepalive on %s', async (exit) => {
+  vi.resetModules();
+  vi.useFakeTimers();
+  const fetcher = vi.fn().mockResolvedValue(Response.json({ job: { id: 'exit-job', source: 'mock' }, deduplicated: false }, { status: 202 }));
+  vi.stubGlobal('fetch', fetcher);
+  const image = await import('../../web/src/image');
+  const prepare = vi.spyOn(image, 'prepareImage').mockResolvedValue({ blob: new Blob(['synthetic']), width: 480, height: 480 });
+  document.body.innerHTML = '<div id="app"></div>';
+  try {
+    await import('../../web/src/main');
+    document.querySelector<HTMLInputElement>('#agree')!.click();
+    document.querySelector<HTMLButtonElement>('#continue')!.click();
+    const input = document.querySelector<HTMLInputElement>('#upload')!;
+    Object.defineProperty(input, 'files', { value: [new File(['synthetic'], 'synthetic.jpg')] });
+    input.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    fetcher.mockResolvedValue(new Response(null, { status: 204 }));
+    if (exit === 'click') document.querySelector<HTMLButtonElement>('#clear')!.click();
+    else window.dispatchEvent(new Event('pagehide'));
+    expect(fetcher).toHaveBeenLastCalledWith('/api/analyses/exit-job', { method: 'DELETE', keepalive: true });
+  } finally {
+    window.dispatchEvent(new Event('pagehide'));
+    prepare.mockRestore(); vi.unstubAllGlobals(); vi.useRealTimers();
   }
 });
