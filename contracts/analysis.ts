@@ -49,12 +49,12 @@ export const IMAGE_LIMITS = {
   maxBytes: 5 * 1024 * 1024,
 } as const;
 
-/** v3 (R1 review blocker 4): one shared consent text for UI and docs/PRIVACY.md. UI must render CONSENT_TEXT verbatim. */
-export const CONSENT_TEXT_VERSION = "2026-10-24.v3" as const;
+/** v4 (R2 #5: no physical-lifetime overclaim). v3 (R1 review blocker 4): one shared consent text for UI and docs/PRIVACY.md. UI must render CONSENT_TEXT verbatim. */
+export const CONSENT_TEXT_VERSION = "2026-10-24.v4" as const;
 export const CONSENT_TEXT =
   "I have permission to upload this face to Perfect Corp. for cosmetic analysis. " +
   "Perfect Corp. keeps uploaded files for up to 30 days; result and mask links expire after 2 hours. " +
-  "This app holds the scores and the YouCam masks in memory for at most 30 minutes to estimate zone counts in my browser, " +
+  "This app makes the scores and the YouCam masks available for at most 30 minutes to estimate zone counts in my browser; leftover copies in server memory are cleared later, not instantly. " +
   "and tries to delete the analysis (here and at Perfect Corp.) when I press Delete or leave the page; deletion is best effort and the app shows if it failed. " +
   "A downloaded log contains scores, skin-type labels, the app's zone estimates, and the dates, product categories, notes and symptoms I type, but no photo, masks or links. " +
   "This is not medical advice.";
