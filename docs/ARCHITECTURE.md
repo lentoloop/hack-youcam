@@ -1,25 +1,13 @@
-# Before Another Bottle architecture
+# Breakout Log (working title) architecture
 
-The phone-first Vite app uses strict TypeScript and browser DOM APIs, with no runtime UI framework. Frozen types/constants come from `contracts/`; the pure decision engine and three generic cards come from `shared/`. S2 does not modify those modules. The renderer uses the real shared decision engine for ownership and severe-symptom escalation; local e2e tests verify its decisions.
+Frozen contracts live in `contracts/analysis.ts` and `contracts/log.ts`. Pure deterministic `shared/log.ts` replaces the purchase-decision engine: it orders the timeline, selects the earliest live baseline, lists missing information and emits a referral only for self-reported severe symptoms. Source badges distinguish Live, Sample and Mock. Every view states that the log cannot determine the responsible product.
 
-## Flow
+The phone flow is versioned consent → capture guide → photo selection → self-report and editable product-change table → analyze. The browser orients the photo, center-crops to 3:4 and re-encodes a 600×800 JPEG. This can upscale a valid source with a short side of at least 480 pixels. No original metadata is retained. Existing api/poll modules submit multipart data, poll at 10-second intervals and offer resume at the two-minute deadline without recreating a task.
 
-Consent (versioned, timestamped) → camera/upload → EXIF-oriented bitmap → proportional downsize (never upscale) → JPEG re-encode without original metadata → multipart POST `/api/analyses` → GET job every 10 seconds → raw provider observations → local goal/ownership/symptom inputs → `decide()` → one next step with expandable evidence. The short side must remain at least 480px, long side at most 2560px, JPEG at most 5 MiB. Face width over 60% is capture guidance; provider validation remains authoritative.
+On success, `regions-browser.ts` decodes in-memory PNG data URLs using createImageBitmap and canvas. `shared/regions.ts` reads alpha only: acne marker blobs use 8-connected components, classified at their rounded centroid. T-zone wins whenever both zone masks cover the pixel; U-zone follows, then other. Redness counts positive-alpha pixels and computes their mean alpha by the same zone rule. Missing masks yield zero statistics or other-zone classification. All supplied masks must occupy the same 600×800 RGBA space. Output is exactly T-zone, U-zone, other. Real run2 fixtures yield 30 marker blobs: 7 T-zone, 21 U-zone, 2 other. These are heuristic marker counts and can undercount merged spots, not verified lesion counts.
 
-At two minutes the UI retains the job ID in memory and offers resume, without creating another task. End-session, page exit, or 30 minutes sends DELETE with keepalive and clears browser-held results and identifiers. Resume works within the current page session, not after closing/reloading. Changing ownership never calls the API. Failed and quota states remain explicit; a user must choose the labeled sample.
+Log entries retain provider observations, verbatim zone labels, derived statistics and framing confirmation. The UI labels estimates as app calculations from YouCam masks, not YouCam measurements. Comparison calls compareEntries and shows numbers side by side without deltas. Both entries must confirm the same framing; image sizes and any two region methods must match. Regions are compared only when present on both entries. Capture guidance cannot verify that framing or lighting actually match.
 
-## Modes and integration
+Strict import rejects unknown versions, unknown keys at every object level, malformed dates, nonfinite statistics, URLs/data URLs anywhere, and JSON above 200 KB. Downloads validate against the same schema. There is no localStorage or server-side history. Clear/page exit/30-minute expiry resets browser state and sends keepalive DELETE for the active analysis; a stale POST completion is also deleted. Explicit Delete my analysis preserves the local numbers-only record. Provider files may remain for up to 30 days and result links expire after 2 hours, as stated in v2 consent. No server retention guarantee is inferred from browser deletion.
 
-`YOUCAM_MODE=mock|live` is a server-only adapter setting. Live requires the server-side key described in `.env.example`; no key belongs in Vite variables. Default `npm run dev` proxies `/api` to `http://localhost:8787`. Run `npm run dev` in service for the local Miniflare mock worker and ephemeral D1. Production builds always use same-origin `/api`; service responses supply Live/Mock provenance. No silent fallback.
-
-Sample is a separate built-in fixture: synthetic numbers, labeled Sample (pre-analyzed), with a CSS silhouette framing placeholder and no real face photograph. It makes zero API requests. It is not evidence of a successful provider integration.
-
-## Budget and privacy boundaries
-
-Four SD actions cost 9 units per successful run. Hard budget: 990/1000 units; 10 untouched. Reserve 450 units for 50 judge runs. Remaining allocations: integration 108, recording 72, public 180, repair 180. S1 service owns atomic reservations, concurrency two, two live runs/IP/day, deduplication, and retained provider task IDs; the browser cannot enforce budget controls.
-
-Images/results are session-only and deleted on exit or after 30 minutes. Browser keeps no image URLs, localStorage, analytics, or result logs. The server must enforce matching 30-minute deletion, avoid image/URL logs and backups, and retain only allowed task/quota accounting. Provider retention is unconfirmed. Provider source-image retention: **UNCONFIRMED**. Live release requires confirmation; app deletion is not a provider deletion promise.
-
-## Release checks
-
-S1 engine integration, actual live success, service retention/budget checks, phone camera/EXIF rehearsal and free hosting remain release gates. No deployment is performed by S2. Judge URL must remain available through 2026-11-21 13:00 Asia/Taipei.
+Service budget, adapter and provider deletion behavior remain owned by the service implementation. Sample is a separate explicit action, never an automatic live fallback. Failed analysis retains the self-report draft without inventing a live baseline. Phone camera, browser PNG decoding and live end-to-end service verification remain release checks.
