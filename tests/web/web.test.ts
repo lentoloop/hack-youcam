@@ -56,3 +56,56 @@ it('runs full mocked upload, derives regions, downloads numbers and deletes anal
 });
 it('sample makes no request and expires at 30 minutes', async () => { vi.useFakeTimers(); vi.resetModules(); vi.stubGlobal('fetch', vi.fn()); document.body.innerHTML = '<div id="app"></div>'; await import('../../web/src/main'); (document.getElementById('sample') as HTMLButtonElement).click(); expect(document.getElementById('results')!.textContent).toContain('Sample (pre-analyzed)'); expect(fetch).not.toHaveBeenCalled(); await vi.advanceTimersByTimeAsync(30 * 60 * 1000); expect(document.getElementById('results')!.textContent).toBe(''); });
 it('poll deadline ignores a late result', async () => { vi.useFakeTimers(); let resolve!: (v: GetAnalysisResponse) => void; const done = vi.fn(), timeout = vi.fn(); pollJob(() => new Promise(r => { resolve = r; }), done, vi.fn(), timeout); await vi.advanceTimersByTimeAsync(120000); expect(timeout).toHaveBeenCalledOnce(); resolve({} as GetAnalysisResponse); await Promise.resolve(); expect(done).not.toHaveBeenCalled(); });
+
+it.each([
+    ['malformed JSON', '{', /JSON|property|position/i],
+    ['unknown version', JSON.stringify({ version: 'old' }), /Unexpected fields|Invalid version/],
+    ['embedded image', JSON.stringify({ image: 'data:image/png;base64,AA==' }), /Unsafe/],
+])('shows import rejection for %s and preserves the log', async (_name, contents, message) => {
+    vi.resetModules(); document.body.innerHTML = '<div id="app"></div>';
+    await import('../../web/src/main');
+    document.getElementById('sample')!.click();
+    const before = document.getElementById('results')!.textContent;
+    const input = document.getElementById('import') as HTMLInputElement;
+    const file = new File([contents], 'invalid.json');
+    Object.defineProperty(file, 'text', { value: async () => contents });
+    Object.defineProperty(input, 'files', { value: [file] });
+    input.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(document.getElementById('status')!.textContent).toMatch(message));
+    expect(document.getElementById('results')!.textContent).toBe(before);
+});
+it('clear resets the log, report, consent and download state', async () => {
+    vi.resetModules(); document.body.innerHTML = '<div id="app"></div>';
+    await import('../../web/src/main');
+    document.getElementById('add-change')!.click();
+    (document.getElementById('areas') as HTMLInputElement).value = 'cheeks';
+    document.getElementById('sample')!.click();
+    expect((document.getElementById('download') as HTMLButtonElement).disabled).toBe(false);
+    document.getElementById('clear')!.click();
+    expect(document.getElementById('results')!.textContent).toBe('');
+    expect(document.getElementById('changes')!.children).toHaveLength(0);
+    expect((document.getElementById('areas') as HTMLInputElement).value).toBe('');
+    for (const id of ['download', 'continue']) expect((document.getElementById(id) as HTMLButtonElement).disabled).toBe(true);
+    expect(document.getElementById('status')!.textContent).toBe('Log cleared.');
+});
+it.each([false, true])('comparison requires same-framing confirmation: %s', async confirmed => {
+    const { renderResults } = await import('../../web/src/results');
+    const first = structuredClone(SAMPLE), second = structuredClone(SAMPLE);
+    second.id = 'second'; second.date = '2026-10-25T08:35:00.000Z'; second.observations[0]!.uiScore = 71;
+    first.framing.userConfirmedSameFraming = second.framing.userConfirmedSameFraming = confirmed;
+    const root = document.createElement('section');
+    renderResults(root, { version: 'breakout-log.v1', createdAt: SAMPLE.date, changes: [], selfReport: { areas: '', discomfort: '', reportedSevereSymptom: false }, entries: [first, second] });
+    expect(root.textContent).toContain('Sample (pre-analyzed)');
+    expect(root.textContent).toContain('Side-by-side entries');
+    if (confirmed) {
+        expect(root.textContent).toContain('acne: 66 | 71');
+        expect(root.textContent).toContain('t_zone: marker blobs 7 | 7');
+        expect(root.textContent).not.toMatch(/%|delta|improv|Confirm the same framing/i);
+        const selects = root.querySelectorAll('select');
+        selects[1]!.value = '0'; selects[1]!.dispatchEvent(new Event('change'));
+        expect(root.textContent).toContain('acne: 66 | 66');
+    } else {
+        expect(root.textContent).toContain('Confirm the same framing for both entries first.');
+        expect(root.textContent).not.toContain('acne: 66 | 71');
+    }
+});

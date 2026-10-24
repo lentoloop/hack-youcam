@@ -1,6 +1,6 @@
 # Breakout Log (working title) architecture
 
-Frozen contracts live in `contracts/analysis.ts` and `contracts/log.ts`. Pure deterministic `shared/log.ts` replaces the purchase-decision engine: it orders the timeline, selects the earliest live baseline, lists missing information and emits a referral only for self-reported severe symptoms. Source badges distinguish Live, Sample and Mock. Every view states that the log cannot determine the responsible product.
+Frozen contracts live in `contracts/analysis.ts` and `contracts/log.ts`. Pure deterministic `shared/log.ts` builds the appearance log: it orders the timeline, selects the earliest live baseline, lists missing information and emits a referral only for self-reported severe symptoms. Source badges distinguish Live, Sample and Mock. Every view states that the log cannot determine the responsible product.
 
 The phone flow is versioned consent → capture guide → photo selection → self-report and editable product-change table → analyze. The browser orients the photo, center-crops to 3:4 and re-encodes a 600×800 JPEG. This can upscale a valid source with a short side of at least 480 pixels. No original metadata is retained. Existing api/poll modules submit multipart data, poll at 10-second intervals and offer resume at the two-minute deadline without recreating a task.
 

@@ -14,7 +14,7 @@ Service Vitest now includes `tests/shared/**/*.test.ts` and resolves its bare Vi
 
 ## Removed tests and code
 
-Replaced the v1 e2e expectations for three recommendation cards, `consider_category`, the fifth checkbox, `see_dermatologist` decision markup, and hidden product cards. These describe the removed purchase flow. The severe-symptom case was migrated, not dropped; DELETE coverage was retained and extended. No test is skipped in the final full runs.
+Replaced the v1 e2e expectations for three legacy cards, `consider_category`, the fifth checkbox, `see_dermatologist` decision markup, and hidden legacy cards. These describe the removed legacy flow. The severe-symptom case was migrated, not dropped; DELETE coverage was retained and extended. No test is skipped in the final full runs.
 
 No implementation files were removed: `shared/products.ts`, `shared/decide.ts`, and legacy decision tests are already absent from this merge. Repository searches found no remaining implementation imports of them or consumers of ProductCard/DecideFn outside contracts. `contracts/decision.ts` and its barrel export remain because the user explicitly froze exported contract types. No frozen files were changed.
 
