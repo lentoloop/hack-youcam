@@ -67,6 +67,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
   private async api(path: string, body?: unknown): Promise<any> {
     const res = await this.fetcher(HOST + path, {
       method: body ? "POST" : "GET",
+      redirect: "error",
       headers: {
         Authorization: ["Bearer", this.key].join(" "),
         "Content-Type": "application/json",
@@ -247,14 +248,18 @@ export function createAdapter(
       503,
     );
   const suffixes = (env as AdapterEnv & { YOUCAM_STORAGE_HOST_SUFFIXES?: string }).YOUCAM_STORAGE_HOST_SUFFIXES;
-  if (!suffixes?.split(',').some(s => s.trim()))
+  if (!normalizedStorageSuffixes(suffixes).length)
     throw new ServiceError("live_unavailable", "Live storage host allowlist is not configured (YOUCAM_STORAGE_HOST_SUFFIXES).", 503);
   return new LiveAdapter(env.YOUCAM_API_KEY, fetcher, suffixes);
+}
+
+function normalizedStorageSuffixes(suffixes = ""): string[] {
+  return suffixes.split(',').map(s => s.trim().toLowerCase().replace(/^\./, '')).filter(Boolean);
 }
 
 export function validStorageUrl(url: URL, suffixes = ""): boolean {
   const host = url.hostname.toLowerCase();
   if (url.protocol !== 'https:' || url.username || url.password || url.port || host.includes(':') || /^[\d.]+$/.test(host) || !host.includes('.') || /\.(localhost|local|internal|test|invalid)$/.test(host)) return false;
-  const allowed = suffixes.split(',').map(s => s.trim().toLowerCase().replace(/^\./, '')).filter(Boolean);
+  const allowed = normalizedStorageSuffixes(suffixes);
   return !allowed.length || allowed.some(s => host === s || host.endsWith('.'+s));
 }

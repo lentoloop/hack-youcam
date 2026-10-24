@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import {
   describe,
   it,
@@ -344,7 +345,7 @@ it.each(['reservations','mock_reservations'])('sweep abandons interrupted %s whi
   expect(await guard.status()).toMatchObject({reservedUnits:18,remainingByPool:{judge:450,public:162}});
   expect((await guard.reserve({pool:'judge',ipHash:'judge',sessionId:'judge',imageSha256:'judge',units:9})).ok).toBe(true);
 });
-it('enforces 50 SQL statements and 50 subrequests under full sweep CAS races and provider failures',async()=>{
+it.each(['failure', 'redirect', 'redirect-race'])('enforces sweep SQL and external caps with %s',async scenario=>{
   const e=env(); e.YOUCAM_API_KEY='synthetic';
   for(let i=0;i<8;i++) await e.DB.prepare("INSERT INTO jobs(id,state,mode,created_at,updated_at,session_id,provider_task_id,submit_started) VALUES(?,'running','live','','',?,'handle',1)").bind(String(i),String(i)).run();
   for(const table of ['reservations','mock_reservations']) await e.DB.prepare(`INSERT INTO ${table}(id,pool,ip_hash,session_id,image_sha,day,units,created_at) VALUES('orphan','public','ip','session','sha','day',9,0)`).bind().run();
@@ -354,13 +355,38 @@ it('enforces 50 SQL statements and 50 subrequests under full sweep CAS races and
     const count=()=>{expect(++queries).toBeLessThanOrEqual(50);expect(++subrequests).toBeLessThanOrEqual(50);};
     return {async all(){count();return statement.all();},async run(){count();
       // Every final CAS loses to a newer submission generation.
-      if(q.startsWith('UPDATE jobs SET cleanup_status=')) await original('UPDATE jobs SET submission_generation=submission_generation+1 WHERE id=?').bind(a[2]).run();
+      if(scenario !== 'redirect' && q.startsWith('UPDATE jobs SET cleanup_status=')) await original('UPDATE jobs SET submission_generation=submission_generation+1 WHERE id=?').bind(a[2]).run();
       return statement.run();}};
   }})) as any;
-  await scheduled({},e,{},async()=>{calls++;expect(++subrequests).toBeLessThanOrEqual(50);throw Error('offline provider failure');});
-  expect(queries).toBe(35); expect(calls).toBe(8); expect(subrequests).toBe(43);
+  let external=0;
+  const { MockAgent, fetch: offlineFetch } = createRequire(import.meta.url)('undici');
+  const agent = new MockAgent(); agent.disableNetConnect();
+  const pool = agent.get('https://yce-api-01.makeupar.com');
+  // A default-follow fetch would dispatch 21 requests for each call.
+  for(let hop=0;hop<=20;hop++) pool.intercept({method:'POST',path:hop===0?'/s2s/v2.0/task/delete':'/redirect/'+hop}).reply(()=>{
+    expect(++external).toBeLessThanOrEqual(50);
+    expect(++subrequests).toBeLessThanOrEqual(50);
+    return hop===20 ? {statusCode:200,data:'{"data":{}}'} :
+      {statusCode:307,data:'',responseOptions:{headers:{location:'/redirect/'+(hop+1)}}};
+  }).persist();
+  try {
+    await scheduled({},e,{},async(url,init)=>{
+      calls++;
+      if(scenario==='failure') {expect(++subrequests).toBeLessThanOrEqual(50);throw Error('offline provider failure');}
+      const before=external;
+      try {return await offlineFetch(url,{...init,dispatcher:agent});}
+      finally {expect(external-before).toBeLessThanOrEqual(1);}
+    });
+  } finally {await agent.close();}
+  const raced=scenario!=='redirect';
+  expect(queries).toBe(raced?35:19); expect(calls).toBe(raced?8:4);
+  expect(subrequests).toBe(raced?43:23);
+  if(scenario!=='failure') expect(external).toBe(calls);
+  const rows=(await original("SELECT cleanup_status,provider_task_id FROM jobs WHERE id IN (SELECT id FROM deleted_jobs)").bind().all()).results;
+  expect(rows).toHaveLength(4);
+  expect(rows.every((row:any)=>row.cleanup_status===(raced?'pending':'failed') && row.provider_task_id==='handle')).toBe(true);
 });
-it.each([undefined,'', ' , '])('live fails closed for allowlist %s',async suffixes=>{
+it.each([undefined,'', ' , ', '.', ' , . '])('live fails closed for allowlist %s',async suffixes=>{
  const e=env(); e.YOUCAM_MODE='live';e.YOUCAM_API_KEY='synthetic';e.YOUCAM_STORAGE_HOST_SUFFIXES=suffixes;
  expect(await (await handle(request(),e)).json()).toMatchObject({error:{code:'live_unavailable',message:expect.stringContaining('allowlist')}});
 });

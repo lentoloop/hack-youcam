@@ -82,7 +82,7 @@ describe("adapters and image validation", () => {
       observations: [{ rawScore: 75, source: "live" }],
     });
     expect(calls[1].init.method).toBe("PUT");
-    expect(calls[1].init.redirect).toBe("error");
+    expect(calls.every(call => call.init.redirect === "error")).toBe(true);
     expect(calls[1].init.headers).toEqual({ "Content-Length": String(image.bytes.length), "Content-Type": "image/jpeg" });
     expect(JSON.parse(calls[0].init.body)).toEqual({ files: [{ content_type: "image/jpeg", file_name: "capture.jpg", file_size: image.bytes.length }] });
     expect(JSON.parse(calls[2].init.body).format).toBe("json");
@@ -264,4 +264,13 @@ it.each(['truncated', 'huge', 'rgb'])('omits a bad IHDR before returning mask: %
   const result = await a.poll('t');
   expect(result).toMatchObject({state:'succeeded', masks:{redness:run2Masks.redness}});
   if (result.state === 'succeeded') expect(result.masks.acne).toBeUndefined();
+});
+
+it.each(['submit', 'poll', 'deleteTask'] as const)('rejects provider API redirects during %s', async operation => {
+  const adapter = new LiveAdapter('synthetic', async (_url, init) => {
+    expect(init?.redirect).toBe('error');
+    return new Response(null, { status: 307, headers: { location: '/redirect' } });
+  });
+  const result = operation === 'submit' ? adapter.submit(image) : adapter[operation]('private');
+  await expect(result).rejects.toMatchObject({ code: 'provider_error', status: 502 });
 });
