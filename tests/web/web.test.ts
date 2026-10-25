@@ -6,7 +6,7 @@ import { serializeLog } from '../../web/src/log-file';
 import { prepareImage } from '../../web/src/image';
 import { pollJob } from '../../web/src/poll';
 import type { GetAnalysisResponse } from '../../contracts/analysis';
-afterEach(() => { window.dispatchEvent(new Event('pagehide')); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { window.dispatchEvent(new Event('pagehide')); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); window.history.replaceState({}, '', '/'); });
 it('crops to 600x800 JPEG and releases bitmap', async () => { const close = vi.fn(), drawImage = vi.fn(); vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 800, height: 600, close })); vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D); vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(cb => cb(new Blob(['jpeg'], { type: 'image/jpeg' }))); const result = await prepareImage(new File(['x'], 'x.jpg')); expect(result.width).toBe(600); expect(result.height).toBe(800); expect(drawImage).toHaveBeenCalledWith(expect.anything(), 175, 0, 450, 600, 0, 0, 600, 800); expect(close).toHaveBeenCalledOnce(); });
 it('runs full mocked upload, derives regions, downloads numbers and deletes analysis', async () => {
     vi.useFakeTimers();
@@ -132,4 +132,27 @@ it('rejects oversized PNG dimensions before browser decoding', async () => {
     const decode = vi.fn(); vi.stubGlobal('createImageBitmap', decode);
     await expect(decodeMask('data:image/png;base64,' + btoa(String.fromCharCode(...bytes)))).rejects.toThrow('dimensions');
     expect(decode).not.toHaveBeenCalled();
+});
+
+it.each(['?demo=synthetic', '', '?demo=other'])('shows synthetic demo disclosure only for the explicit mode: %s', async query => {
+    vi.resetModules();
+    window.history.replaceState({}, '', '/' + query);
+    document.body.innerHTML = '<div id="app"></div>';
+    await import('../../web/src/main');
+    const banner = document.getElementById('synthetic-demo');
+    if (query === '?demo=synthetic') {
+        expect(banner?.textContent).toBe('Demo images are AI-generated synthetic faces, not real people. Created with Grok.');
+        expect(banner?.closest('[hidden]')).toBeNull();
+        document.getElementById('sample')!.click();
+        expect(banner?.isConnected).toBe(true);
+        expect(banner?.closest('[hidden]')).toBeNull();
+    } else expect(banner).toBeNull();
+});
+it('labels the sample scores as coming from an AI-generated synthetic face', async () => {
+    vi.resetModules();
+    document.body.innerHTML = '<div id="app"></div>';
+    await import('../../web/src/main');
+    expect(document.body.textContent).toContain('Sample uses pre-analyzed run2 scores from an AI-generated synthetic face, not a real person. Created with Grok.');
+    document.getElementById('sample')!.click();
+    expect(document.getElementById('status')!.textContent).toContain('scores from an AI-generated synthetic face');
 });

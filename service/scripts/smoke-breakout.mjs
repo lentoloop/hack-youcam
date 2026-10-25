@@ -59,7 +59,8 @@ async function main() {
     throw Error("SMOKE_LIVE_CONFIRM=1 and YOUCAM_API_KEY required");
   const root = await realpath("/workspace/eng/youcam-test-face");
   const face = await realpath(resolve(process.env.FACE ?? root + "/ai-acne-face-01.jpg"));
-  if (!face.startsWith(root + sep)) throw Error("FACE must be inside the approved face directory");
+  const demoRoot = await realpath("/workspace/eng/youcam-demo-face");
+  if (![root, demoRoot].some(approved => face.startsWith(approved + sep))) throw Error("FACE must be inside an approved face directory");
   // Exclusive lock prevents concurrent operators from bypassing the two-run cap.
   lock = await open(ledger + ".breakout-lock", "wx");
   const lines = (await readFile(ledger, "utf8")).split("\n").filter(l => /\bstep=breakout-live\b/.test(l));

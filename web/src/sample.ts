@@ -1,4 +1,5 @@
 import type { LogEntry } from '../../contracts/log';
+export const SAMPLE_DESCRIPTION = 'Sample uses pre-analyzed run2 scores from an AI-generated synthetic face, not a real person. Created with Grok. No upload or API call.';
 export const SAMPLE: LogEntry = {
     id: 'sample-run2', date: '2026-10-24T08:35:00.000Z', source: 'sample',
     observations: [{ concern: 'acne', rawScore: 45.7384, uiScore: 66, source: 'sample' }, { concern: 'redness', rawScore: 32.16484832763672, uiScore: 60, source: 'sample' }, { concern: 'texture', rawScore: 55.699509382247925, uiScore: 70, source: 'sample' }],

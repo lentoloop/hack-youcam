@@ -2,7 +2,7 @@ import { CONSENT_TEXT, CONSENT_TEXT_VERSION, type ConsentRecord } from '../../co
 import type { BreakoutLog, ProductChange } from '../../contracts/log';
 import { createApi, AnalysisError } from './api';
 import { prepareImage } from './image';
-import { SAMPLE } from './sample';
+import { SAMPLE, SAMPLE_DESCRIPTION } from './sample';
 import { renderResults, sourceLabel } from './results';
 import { pollJob } from './poll';
 import { captureGuide } from './capture-guide';
@@ -10,7 +10,7 @@ import { regionsFromMasks } from './regions-browser';
 import { downloadLog, importLog } from './log-file';
 import './style.css';
 const api = createApi(), root = document.querySelector<HTMLElement>('#app')!;
-root.innerHTML = `<header>Breakout Log (working title)</header><main><h1>Make room for the facts.</h1><p>Record product changes and cosmetic appearance observations to bring to a professional.</p><section id="consent"><h2>Your face, your choice</h2><label><input id="agree" type="checkbox">${CONSENT_TEXT}</label><p>Consent version: ${CONSENT_TEXT_VERSION}</p><button id="continue" disabled>Continue to photo</button></section><section id="capture" hidden>${captureGuide}<label>Take a selfie<input id="camera" type="file" accept="image/*" capture="user"></label><label>Or upload a photo<input id="upload" type="file" accept="image/*"></label><p id="photo-status"></p><label>Judge access code (optional)<input id="judge" type="password" autocomplete="off"></label><section id="report"><h2>Your own account</h2><label>Areas<input id="areas"></label><label>Discomfort<textarea id="discomfort"></textarea></label><label><input id="severe" type="checkbox">Painful, swollen or spreading breakouts</label><h2>Recent product changes</h2><p>Active means an active ingredient such as a retinoid, acid or BPO.</p><div class="table-scroll"><table><thead><tr><th>Category</th><th>Started on</th><th>Contains active?</th><th>Note</th><th></th></tr></thead><tbody id="changes"></tbody></table></div><button id="add-change">Add product change</button></section><button id="analyze" disabled>Analyze and add entry</button></section><button id="sample">Try Sample (pre-analyzed)</button><p>Sample uses pre-analyzed run2 scores; no upload or API call.</p><section id="status" role="status" aria-live="polite"></section><button id="resume" hidden>Resume existing job</button><section id="results"></section><button id="download" disabled>Download log</button><label>Import log<input id="import" type="file" accept="application/json,.json"></label><button id="clear">Clear log</button><button id="retry-delete" hidden>Retry cleanup</button><button id="delete">Delete my analysis</button><footer>Appearance records only. No diagnosis. Session expires after 30 minutes.</footer></main>`;
+root.innerHTML = `<header>Breakout Log (working title)</header><main><h1>Make room for the facts.</h1><p>Record product changes and cosmetic appearance observations to bring to a professional.</p><section id="consent"><h2>Your face, your choice</h2><label><input id="agree" type="checkbox">${CONSENT_TEXT}</label><p>Consent version: ${CONSENT_TEXT_VERSION}</p><button id="continue" disabled>Continue to photo</button></section>${new URLSearchParams(window.location.search).get('demo') === 'synthetic' ? '<aside id="synthetic-demo" class="demo-banner">Demo images are AI-generated synthetic faces, not real people. Created with Grok.</aside>' : ''}<section id="capture" hidden>${captureGuide}<label>Take a selfie<input id="camera" type="file" accept="image/*" capture="user"></label><label>Or upload a photo<input id="upload" type="file" accept="image/*"></label><p id="photo-status"></p><label>Judge access code (optional)<input id="judge" type="password" autocomplete="off"></label><section id="report"><h2>Your own account</h2><label>Areas<input id="areas"></label><label>Discomfort<textarea id="discomfort"></textarea></label><label><input id="severe" type="checkbox">Painful, swollen or spreading breakouts</label><h2>Recent product changes</h2><p>Active means an active ingredient such as a retinoid, acid or BPO.</p><div class="table-scroll"><table><thead><tr><th>Category</th><th>Started on</th><th>Contains active?</th><th>Note</th><th></th></tr></thead><tbody id="changes"></tbody></table></div><button id="add-change">Add product change</button></section><button id="analyze" disabled>Analyze and add entry</button></section><button id="sample">Try Sample (pre-analyzed)</button><p>${SAMPLE_DESCRIPTION}</p><section id="status" role="status" aria-live="polite"></section><button id="resume" hidden>Resume existing job</button><section id="results"></section><button id="download" disabled>Download log</button><label>Import log<input id="import" type="file" accept="application/json,.json"></label><button id="clear">Clear log</button><button id="retry-delete" hidden>Retry cleanup</button><button id="delete">Delete my analysis</button><footer>Appearance records only. No diagnosis. Session expires after 30 minutes.</footer></main>`;
 const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const fresh = (): BreakoutLog => ({ version: 'breakout-log.v1', createdAt: new Date().toISOString(), changes: [], selfReport: { areas: '', discomfort: '', reportedSevereSymptom: false }, entries: [] });
 let log = fresh(), consent: ConsentRecord | undefined, sessionId = crypto.randomUUID(), jobId: string | undefined, stopPoll: (() => void) | undefined, generation = 0, expires: ReturnType<typeof setTimeout> | undefined, pending: File | undefined, submittedFraming = false, submittedAt = '';
@@ -26,7 +26,7 @@ async function deleteCurrent(id = jobId) { if (!id) return;
     cleanupIds.add(id);
     try {
         const result = await api.delete(id);
-        get('status').textContent = `Deleted here. Perfect Corp. cleanup: ${result.provider}. Uploaded files follow Perfect Corp.'s 30-day retention.`;
+        get('status').textContent = `Deleted here. Perfect Corp. cleanup: ${result.provider}. Perfect Corp. documents that task deletion removes its input files; anything not deleted expires after 30 days.`;
         get('retry-delete').hidden = !['failed', 'pending'].includes(result.provider);
         if (!['failed', 'pending'].includes(result.provider)) { cleanupIds.delete(id); if (jobId === id) jobId = undefined; }
         get('retry-delete').hidden = cleanupIds.size === 0;
@@ -99,7 +99,7 @@ finally {
     }
 } })(); };
 get('sample').onclick = () => { generation++; stopPoll?.(); deleteCurrent(); get('resume').hidden = true; armExpiry(); readReport(); if (!log.entries.some(e => e.id === SAMPLE.id))
-    log.entries.push(structuredClone(SAMPLE)); get('status').textContent = 'Sample (pre-analyzed), not a live analysis.'; render(); };
+    log.entries.push(structuredClone(SAMPLE)); get('status').textContent = `Sample (pre-analyzed), not a live analysis. ${SAMPLE_DESCRIPTION}`; render(); };
 get('download').onclick = () => { try {
     readReport();
     render();

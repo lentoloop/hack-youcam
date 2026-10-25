@@ -23,7 +23,11 @@ npm run build
 
 Tests cover strict log import, framing comparison refusals, the real run2 mask fixture, a mocked browser upload, numbers-only download and deletion. No live API call is required.
 
-Perfect Corp. keeps uploaded files for up to 30 days; result links expire after 2 hours. See [privacy](docs/PRIVACY.md), [architecture](docs/ARCHITECTURE.md), and [demo script](docs/DEMO-SCRIPT.md). No deployment is performed here. Judge URL, access instructions, video and screenshots remain release deliverables. Live service and phone rehearsal require separate verification.
+## Demo images
+
+Demo images in `/workspace/eng/youcam-demo-face/` are AI-generated synthetic faces, not a real person. Created with Grok. No real-person photo was used. Keep C2PA provenance on published originals: browser upload re-encoding strips metadata, so publish only the unmodified originals. Open the demo with `?demo=synthetic` to show the on-screen disclosure. Sample scores also came from an AI-generated synthetic face.
+
+Perfect Corp. documents that task deletion removes its input files; anything not deleted expires after 30 days. Result links expire after 2 hours. See [privacy](docs/PRIVACY.md), [architecture](docs/ARCHITECTURE.md), and [demo script](docs/DEMO-SCRIPT.md). No deployment is performed here. Judge URL, access instructions, video and screenshots remain release deliverables. Live service and phone rehearsal require separate verification.
 
 Offline checkpoint (from `service/`):
 
