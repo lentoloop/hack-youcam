@@ -19,7 +19,6 @@ export function renderIngredientNotes(root: HTMLElement, log: BreakoutLog, chang
     add('p', CAUSE_CAVEAT, add('div', '', section, 'ingredient-caveat'));
     const notes = [...(log.ingredientNotes ?? [])].sort((a, b) => b.date.localeCompare(a.date));
     if (!notes.length) add('p', 'No ingredient notes yet.', add('section', '', section, 'note-empty'));
-    let editingId: string | undefined;
     let day: HTMLElement | undefined;
     let date = '';
     for (const note of notes) {
@@ -39,19 +38,6 @@ export function renderIngredientNotes(root: HTMLElement, log: BreakoutLog, chang
             add('span', ingredient, ingredients, 'ingredient-chip');
         if (note.note) add('p', `Note: ${note.note}`, card);
         if (note.startedOn) add('p', `Started on ${displayDate(note.startedOn)}`, card);
-        const edit = document.createElement('button');
-        edit.type = 'button';
-        edit.textContent = 'Edit note';
-        edit.onclick = () => {
-            editingId = note.id;
-            for (const key of ['date', 'category', 'active', 'ingredients', 'note', 'startedOn'] as const) {
-                const field = form.elements.namedItem(key);
-                if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) field.value = note[key] ?? '';
-            }
-            form.querySelector('button')!.textContent = 'Save note';
-            form.querySelector('input')!.focus();
-        };
-        card.append(edit);
     }
     for (const group of section.querySelectorAll<HTMLElement>('.note-day')) {
         const date = group.querySelector('time')!.dateTime;
@@ -71,14 +57,10 @@ export function renderIngredientNotes(root: HTMLElement, log: BreakoutLog, chang
         const active = value('active');
         if (active !== 'yes' && active !== 'no' && active !== 'unknown') return;
         const ingredientNotes = [...(log.ingredientNotes ?? [])];
-        let id = editingId ?? crypto.randomUUID();
-        while (!editingId && ingredientNotes.some(n => n.id === id)) id = crypto.randomUUID();
+        let id = crypto.randomUUID();
+        while (ingredientNotes.some(n => n.id === id)) id = crypto.randomUUID();
         const note: IngredientNote = { id, date: value('date'), category: value('category'), active, ingredients: value('ingredients'), ...(value('note') ? { note: value('note') } : {}), ...(value('startedOn') ? { startedOn: value('startedOn') } : {}) };
-        if (editingId) {
-            const index = ingredientNotes.findIndex(n => n.id === editingId);
-            if (index === -1) return;
-            ingredientNotes[index] = note;
-        } else ingredientNotes.push(note);
+        ingredientNotes.push(note);
         const checked = parseLogFile({ ...log, ingredientNotes });
         if (!checked.ok) { status.textContent = 'Enter valid dates and text within the field limits.'; return; }
         log.ingredientNotes = ingredientNotes;

@@ -31,7 +31,7 @@ it('assigns a unique ID when generated IDs collide with imported notes', () => {
         uuid.mockRestore();
     }
 });
-it('edits one note and leaves every other note byte-identical', () => {
+it('appends one note and leaves every existing note byte-identical', () => {
     const log = fresh();
     log.ingredientNotes = [
         { id: 'older', date: '2026-10-24', category: 'Cream', active: 'no', ingredients: 'water, glycerin', note: 'Evening', startedOn: '2026-10-01' },
@@ -41,14 +41,15 @@ it('edits one note and leaves every other note byte-identical', () => {
     const before = log.ingredientNotes.map(n => JSON.stringify(n));
     const root = document.createElement('div');
     renderIngredientNotes(root, log, () => {});
-    root.querySelector<HTMLButtonElement>('article button')!.click();
+    expect([...root.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Add note']);
+    root.querySelector<HTMLInputElement>('[name=date]')!.value = '2026-10-28';
     root.querySelector<HTMLInputElement>('[name=category]')!.value = 'Gel';
     root.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
-    expect(log.ingredientNotes).toHaveLength(3);
-    expect(log.ingredientNotes[1]).toEqual({ id: 'target', date: '2026-10-29', category: 'Gel', active: 'yes', ingredients: 'niacinamide' });
-    for (const index of [0, 2]) expect(JSON.stringify(log.ingredientNotes[index])).toBe(before[index]);
+    expect(log.ingredientNotes).toHaveLength(4);
+    expect(log.ingredientNotes[3]).toMatchObject({ date: '2026-10-28', category: 'Gel' });
+    for (const index of [0, 1, 2]) expect(JSON.stringify(log.ingredientNotes[index])).toBe(before[index]);
 });
-it('keeps the caveat visible, adds, orders, safely renders and edits notes', () => {
+it('keeps the caveat visible, adds, orders, safely renders notes', () => {
     const log = fresh(); const root = document.createElement('div');
     const render = () => renderIngredientNotes(root, log, render);
     render(); expect(root.textContent).toContain(CAUSE_CAVEAT); expect(root.textContent).toContain('No ingredient notes yet.');
@@ -60,8 +61,8 @@ it('keeps the caveat visible, adds, orders, safely renders and edits notes', () 
     submit('2026-10-24', '<img src=x>'); submit('2026-10-29', 'Serum');
     expect([...root.querySelectorAll('time')].map(t => t.dateTime)).toEqual(['2026-10-29', '2026-10-24']);
     expect(root.querySelector('img')).toBeNull();
-    root.querySelector<HTMLButtonElement>('article button')!.click(); submit('2026-10-28', 'Lotion');
-    expect(log.ingredientNotes).toHaveLength(2); expect(log.ingredientNotes?.find(n => n.category === 'Lotion')?.date).toBe('2026-10-28');
+    expect(log.ingredientNotes).toHaveLength(2);
+    expect([...root.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Add note']);
 });
 it('retains all source badges for analysis days', () => {
     const log = fresh();

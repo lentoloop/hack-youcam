@@ -187,3 +187,8 @@ The service install also printed `found 0 vulnerabilities`. `npm ls miniflare sh
 After building the web, `bash scripts/verify-release.sh` passed all eight checks: three TypeScript checks, 165 service tests in nine files, 12 e2e tests in two files, 25 web tests in three files, the web build, and all five migrations with fresh SQLite schema and integrity checks. Wrangler 4.155.0's dry run read four files from `web/dist` and reported 258.19 KiB raw and 155.16 KiB gzip, the DB binding, and mock mode. The dry run used a temporary log path because the default Wrangler log directory is read-only on this box.
 
 A local `wrangler dev --local` check with the same configuration returned HTML 200 for `/` and `/release-check-spa`, JavaScript 200 for the built asset, and JSON 404 with `error.code = "not_found"` for `/api/release-check-missing`. The check used no secrets or provider calls.
+
+## October 30 ingredient notes scope
+
+Ingredient notes support adding notes and a newest-first chronological list only.
+Note editing: post-deploy backlog, pending design
