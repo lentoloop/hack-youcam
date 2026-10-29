@@ -1,0 +1,35 @@
+header .edition-mark { display: none; }
+main > h1 { position: relative; isolation: isolate; overflow: visible; }
+.hero-riso-patch {
+  position: absolute;
+  z-index: -1;
+  inline-size: 150px;
+  block-size: 46px;
+  inset-inline-end: 8px;
+  inset-block-end: -12px;
+  background: var(--accent-soft);
+  transform: rotate(-4deg);
+  pointer-events: none;
+  user-select: none;
+}
+.hero-riso-patch::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--focal-screen);
+  background-size: 4px 4px;
+  opacity: .5;
+}
+
+.hero-riso-patch::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: var(--accent-soft);
+  transform: translate(3px, 3px);
+}
+
+@media (forced-colors: active) {
+  .hero-postmark, .hero-riso-patch { display: none; }
+}

@@ -1,0 +1,89 @@
+:root {
+  --paper: #F3F0E9;
+  --paper-2: #E7E2D8;
+  --ink: #292724;
+  --ink-2: #5D5852;
+  --rule: #827B72;
+  --accent: #6535AC;
+  --accent-soft: #E7DCF4;
+  --focus: var(--accent);
+  --referral-bg: var(--paper-2);
+  --referral-border: var(--rule);
+  --font-cjk: "PingFang TC", "Noto Sans CJK TC", "Noto Sans TC", "Microsoft JhengHei";
+  --font-display: "Libre Baskerville", var(--font-cjk), serif;
+  --font-body: "IBM Plex Sans", var(--font-cjk), sans-serif;
+  --font-mono: "IBM Plex Mono", var(--font-cjk), monospace;
+  --text-small: .875rem;
+  --text-observation: var(--text-body);
+  --text-body: 1rem;
+  --text-intro: clamp(1.0625rem, 1.0393rem + .0952vw, 1.125rem);
+  --text-header: .8125rem;
+  --text-h1: clamp(3rem, 2.8143rem + .7619vw, 3.5rem);
+  --text-h2: clamp(1.625rem, 1.5321rem + .381vw, 1.875rem);
+  --text-h3: clamp(1.3125rem, 1.2661rem + .1905vw, 1.4375rem);
+  --text-h4: 1rem;
+  --leading-body: 1.625;
+  --leading-small: 1.57143;
+  --leading-heading: 1.32;
+  --leading-h4: 1.5; --leading-banner: 1.4; --leading-observation: var(--leading-body);
+  --leading-cjk: 1.75; --tracking-display: -.025em;
+  --prose-width: 58ch; --textarea-height: 7rem;
+
+  --s1: .25rem; --s2: .5rem; --s3: .75rem; --s4: 1rem;
+  --s5: 1.25rem; --s6: 1.5rem; --s8: 2rem; --s10: 2.5rem;
+  --s12: 3rem; --s14: 3.5rem; --s18: 4.5rem;
+  --page-padding: clamp(1.25rem, .9714rem + 1.1429vw, 2rem);
+  --panel-padding: clamp(1.5rem, 1.3143rem + .7619vw, 2rem);
+  --section-gap: clamp(2.5rem, 2.1286rem + 1.5238vw, 3.5rem);
+  --hero-top: clamp(3.5rem, 3.1286rem + 1.5238vw, 4.5rem);
+  --page-width: 47.5rem; --headline-width: 37.5rem;
+  --radius: 2px; --radius-square: 0; --radius-oval: 50%;
+  --border: 1px solid var(--ink);
+  --border-muted: 1px solid var(--rule);
+  --border-strong: 2px solid var(--rule);
+  --control-height: 3rem; --tap-size: 2.75rem;
+  --focus-width: 3px; --focus-gap: 2px;
+  --scroll-clearance: 10rem;
+  --frame-border: 2px dashed var(--ink);
+  --frame-width: 180px; --frame-height: 240px;
+  --leading-hero: 1.02; --text-product: 1.1875rem; --leading-product: 1.25;
+  --chip-padding-inline: .625rem; --chip-height: 1.75rem; --chip-gap: .375rem;
+  --plate-width: 280px; --plate-height: 300px;
+  --plate-screen: radial-gradient(circle, rgb(41 39 36 / 12%) .6px, transparent .6px);
+  --plate-step: 6px; --plate-gap: 30px;
+  --grain-ink: rgb(41 39 36 / 2%);
+  --texture-opacity: .02; --texture-dot: .45px; --texture-step: 5px;
+  --texture: radial-gradient(circle, var(--ink) var(--texture-dot), transparent var(--texture-dot));
+  --motif-width: 32px; --motif-height: 24px;
+  --tab-width: 22px; --tab-height: 7px; --tab-offset: 8px;
+  --tab-step: 11px; --tab-top: 2px;
+  --table-width: 840px; --col-category: 160px; --col-date: 172px;
+  --col-active: 160px; --col-note: 240px; --col-remove: 108px;
+  --remove-width: 80px;
+}
+
+:is(#results, #status, .ingredient-notes, .zone-journal) {
+  --paper: #FBF4E7;
+  --paper-2: #EEE3CE;
+  --ink: #302D24;
+  --ink-2: #655B48;
+  --rule: #8A7B62;
+  --accent: #6535AC;
+  --accent-soft: #E7DCF4;
+  --focus: var(--accent);
+  --radius: .5rem;
+  --radius-panel: .875rem;
+  --radius-label: .625rem;
+  --radius-pill: 999px;
+  --border: 1px solid var(--rule);
+  --border-muted: 1px solid var(--rule);
+  --border-label: 3px double var(--rule);
+  --referral-bg: var(--paper);
+  --referral-border: var(--ink);
+}
+
+
+:root {
+  --grain-screen: radial-gradient(circle, var(--grain-ink) var(--texture-dot), transparent var(--texture-dot));
+  --focal-screen: radial-gradient(circle, var(--accent) 1.3px, transparent 1.3px);
+}

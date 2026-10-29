@@ -43,7 +43,7 @@ it('runs full mocked upload, derives regions, downloads numbers and deletes anal
     click('analyze');
     await vi.advanceTimersByTimeAsync(10001);
     const text = document.getElementById('results')!.textContent!;
-    for (const value of ['Your breakout log', 'acne: 66', 'Oily', 'Region stats', 'Estimated by this app from the YouCam mask, not a YouCam measurement', 'Still missing', 'cannot tell which product', 'Mock (test data)', 'please see a dermatologist'])
+    for (const value of ['Your breakout log', 'Acne: 66', 'Oily', 'Region stats', 'Estimated by this app from the YouCam mask, not a YouCam measurement', 'Still missing', 'cannot tell which product', 'Mock (test data)', 'please see a dermatologist'])
         expect(text).toContain(value);
     click('severe');
     (document.querySelector('[aria-label="Category"]') as HTMLInputElement).value = 'updated serum';
@@ -114,15 +114,15 @@ it.each([false, true])('comparison requires same-framing confirmation: %s', asyn
     expect(root.textContent).toContain('Sample (pre-analyzed)');
     expect(root.textContent).toContain('Side-by-side entries');
     if (confirmed) {
-        expect(root.textContent).toContain('acne: 66 | 71');
-        expect(root.textContent).toContain('t_zone: marker blobs 7 | 7');
+        expect(root.textContent).toContain('Acne: 66 | 71');
+        expect(root.textContent).toContain('T-zone: marked spots 7 | 7');
         expect(root.textContent).not.toMatch(/%|delta|improv|Confirm the same framing/i);
         const selects = root.querySelectorAll('select');
         selects[1]!.value = '0'; selects[1]!.dispatchEvent(new Event('change'));
-        expect(root.textContent).toContain('acne: 66 | 66');
+        expect(root.textContent).toContain('Acne: 66 | 66');
     } else {
         expect(root.textContent).toContain('Confirm the same framing for both entries first.');
-        expect(root.textContent).not.toContain('acne: 66 | 71');
+        expect(root.textContent).not.toContain('Acne: 66 | 71');
     }
 });
 it('rejects oversized PNG dimensions before browser decoding', async () => {
@@ -194,4 +194,70 @@ it.each([false, true])('ends cleanup retries without a provider task and starts 
         document.getElementById('delete')!.click();
         expect(fetcher).toHaveBeenCalledTimes(requests);
     }
+});
+
+
+it('rounds displayed scores without trailing zeroes and preserves missing scores', async () => {
+    const { displayScore } = await import('../../web/src/results');
+    expect(displayScore(45.7384)).toBe('45.7');
+    expect(displayScore(0)).toBe('0');
+    expect(displayScore(66)).toBe('66');
+    expect(displayScore(undefined)).toBe('Missing');
+});
+
+it('groups rounded whole counts and alpha values', async () => {
+    const { displayInteger } = await import('../../web/src/results');
+    expect(displayInteger(31980)).toBe('31,980');
+    expect(displayInteger(53.797967479674796)).toBe('54');
+    expect(displayInteger(0)).toBe('0');
+});
+
+it('keeps date-only calendar days and preserves absent or invalid dates', async () => {
+    const { displayDate } = await import('../../web/src/results');
+    expect(displayDate('2026-10-20')).toBe('20 Oct 2026');
+    expect(displayDate('2024-02-29')).toBe('29 Feb 2024');
+    expect(displayDate('2026-02-29')).toBe('2026-02-29');
+    expect(displayDate('2026-13-01')).toBe('2026-13-01');
+    expect(displayDate('invalid')).toBe('invalid');
+    expect(displayDate('')).toBe('Date missing');
+    const instant = '2026-10-20T00:30:00.000Z';
+    const localDay = new Date(instant).getDate();
+    expect(displayDate(instant)).toBe(`${localDay} Oct 2026`);
+});
+
+it('renders mapped zones, rounded values and dates while preserving exported data', async () => {
+    const { renderResults } = await import('../../web/src/results');
+    const first = structuredClone(SAMPLE), second = structuredClone(SAMPLE);
+    first.observations[0]!.uiScore = 0;
+    second.id = 'second'; second.date = '2026-10-25T08:35:00.000Z';
+    delete second.observations[0]!.uiScore;
+    second.observations = second.observations.filter(o => o.concern !== 'texture');
+    first.framing.userConfirmedSameFraming = second.framing.userConfirmedSameFraming = true;
+    const log = { version: 'breakout-log.v1' as const, createdAt: SAMPLE.date,
+        changes: [{ id: 'cleanser', category: 'Cleanser', startedOn: '2026-10-20', active: 'yes' as const, note: '2% salicylic acid' }],
+        selfReport: { areas: '', discomfort: '', reportedSevereSymptom: false }, entries: [first, second] };
+    const before = serializeLog(log);
+    const root = document.createElement('section'); root.id = 'results';
+    renderResults(root, log);
+    for (const text of ['Acne: 0 · raw score 45.7', 'Redness: 60 · raw score 32.2', 'Texture: 70 · raw score 55.7',
+        'Whole face: Combination & Sensitive', 'T-zone: Oily', 'U-zone: Dry & Sensitive',
+        'T-zone: 7 marked spots · red area 31,980\u00a0px · average intensity 54',
+        'U-zone: 21 marked spots · red area 24,120\u00a0px · average intensity 88',
+        'Other areas: 2 marked spots · red area 1,838\u00a0px · average intensity 46',
+        '20 Oct 2026 · Cleanser · Contains active: yes · 2% salicylic acid',
+        'Acne: 0 | 45.7', 'Texture: 70 | Missing',
+        'T-zone: marked spots 7 | 7; red area (px) 31,980 | 31,980; average intensity 54 | 54']) expect(root.textContent).toContain(text);
+    const options = root.querySelectorAll('select:first-of-type option');
+    expect(options[0]!.textContent).toBe('24 Oct 2026 · Sample (pre-analyzed)');
+    expect(options[0]!.getAttribute('value')).toBe('0');
+    expect(options[1]!.getAttribute('value')).toBe('1');
+    const after = serializeLog(log);
+    expect(after).toBe(before);
+    expect(after).toContain('45.7384');
+    expect(after).toContain('"t_zone"');
+    expect(after).toContain('2026-10-24T08:35:00.000Z');
+    expect(after).not.toContain('T-zone');
+    expect(after).not.toContain('24 Oct 2026');
+    expect(first.observations[0]!.rawScore).toBe(45.7384);
+    expect(first.date).toBe('2026-10-24T08:35:00.000Z');
 });

@@ -1,0 +1,13 @@
+/* Self-hosted Latin only. All faces use font-display: swap in the imported CSS.
+Family             | Licence     | Source                                                   | Weights
+Libre Baskerville  | SIL OFL 1.1 | https://fontsource.org/fonts/libre-baskerville             | 400, 700
+IBM Plex Sans      | SIL OFL 1.1 | https://fontsource.org/fonts/ibm-plex-sans                 | 400, 500
+IBM Plex Mono      | SIL OFL 1.1 | https://fontsource.org/fonts/ibm-plex-mono                 | 400, 500
+Keep each package's LICENSE when redistributing its font files. CJK uses system fonts.
+*/
+@import "@fontsource/libre-baskerville/latin-400.css";
+@import "@fontsource/libre-baskerville/latin-700.css";
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
