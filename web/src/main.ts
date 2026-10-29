@@ -82,7 +82,7 @@ else if (result.job.state === 'failed')
 } }); }
 get('resume').onclick = () => { stopPoll?.(); get('resume').hidden = true; poll(++generation); };
 get('analyze').onclick = () => { void (async () => { if (!pending || !consent)
-    return; const file = pending, token = ++generation; readReport(); submittedFraming = get<HTMLInputElement>('framing').checked; submittedAt = new Date().toISOString(); stopPoll?.(); deleteCurrent(); get<HTMLButtonElement>('analyze').disabled = true; get('resume').hidden = true; get('status').textContent = 'Preparing JPEG on your device…'; try {
+    return; get('start-analysis').hidden = true; const file = pending, token = ++generation; readReport(); submittedFraming = get<HTMLInputElement>('framing').checked; submittedAt = new Date().toISOString(); stopPoll?.(); deleteCurrent(); get<HTMLButtonElement>('analyze').disabled = true; get('resume').hidden = true; get('status').textContent = 'Preparing JPEG on your device…'; try {
     const image = await prepareImage(file);
     if (token !== generation)
         return;

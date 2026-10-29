@@ -157,7 +157,7 @@ it('labels the sample scores as coming from an AI-generated synthetic face', asy
     expect(document.getElementById('status')!.textContent).toContain('scores from an AI-generated synthetic face');
 });
 
-it('ends cleanup retries after a failed upload without a provider task and offers a new analysis', async () => {
+it.each([false, true])('ends cleanup retries without a provider task and starts another analysis directly: %s', async startDirectly => {
     vi.useFakeTimers(); vi.resetModules();
     document.body.innerHTML = '<div id="app"></div>';
     const job = { id: 'failed-upload', state: 'failed', mode: 'live', source: 'live', createdAt: 'now', updatedAt: 'now', error: { code: 'provider_error' } };
@@ -180,9 +180,18 @@ it('ends cleanup retries after a failed upload without a provider task and offer
     expect(document.getElementById('resume')!.hidden).toBe(true);
     expect(document.getElementById('start-analysis')!.hidden).toBe(false);
     const requests = fetcher.mock.calls.length;
-    document.getElementById('start-analysis')!.click();
-    expect(document.getElementById('capture')!.hidden).toBe(false);
-    expect(document.activeElement).toBe(input);
-    document.getElementById('delete')!.click();
-    expect(fetcher).toHaveBeenCalledTimes(requests);
+    if (startDirectly) {
+        input.dispatchEvent(new Event('change'));
+        document.getElementById('analyze')!.click();
+        expect(document.getElementById('start-analysis')!.hidden).toBe(true);
+        await vi.advanceTimersByTimeAsync(10001);
+        expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2);
+        expect(document.getElementById('start-analysis')!.hidden).toBe(true);
+    } else {
+        document.getElementById('start-analysis')!.click();
+        expect(document.getElementById('capture')!.hidden).toBe(false);
+        expect(document.activeElement).toBe(input);
+        document.getElementById('delete')!.click();
+        expect(fetcher).toHaveBeenCalledTimes(requests);
+    }
 });

@@ -14,7 +14,7 @@ npm ci
 (cd web && npm ci)
 ```
 
-The service uses better-sqlite3 13's bundled `prebuilds/linux-x64.node`; skipping install scripts avoids a source build that requires `make` on this box.
+better-sqlite3 13 ships prebuilt binaries for common platforms; `--ignore-scripts` avoids a source build that needs `make`.
 
 Run `npm run dev` in `service/` and `web/` in separate terminals. Open the Vite URL. Its development proxy forwards `/api` to the local service on port 8787. Local service startup creates ephemeral D1, applies all five migrations, and blocks outbound provider requests.
 
