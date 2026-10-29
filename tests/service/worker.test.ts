@@ -7,6 +7,7 @@ import {
   afterEach,
   beforeEach,
 } from "../../service/node_modules/vitest";
+import { D1Executor } from "../../service/budget";
 import { LiveAdapter } from "../../service/adapters";
 import { handle, scheduled, type Env } from "../../service/worker";
 import { CONSENT_TEXT_VERSION } from "../../contracts";
@@ -405,13 +406,13 @@ it.each(['GET','DELETE'])('malformed URL escape returns 404 for %s', async metho
   expect(await response.json()).toMatchObject({ error: { code: 'not_found' } });
 });
 it.each([
-  { balance: 468, judgeUnits: 0, status: 429 },
-  { balance: 469, judgeUnits: 0, status: 202 },
-  { balance: 459, judgeUnits: 9, status: 429 },
-  { balance: 460, judgeUnits: 9, status: 202 },
+  { balance: 458, judgeUnits: 0, status: 429 },
+  { balance: 459, judgeUnits: 0, status: 202 },
+  { balance: 449, judgeUnits: 9, status: 429 },
+  { balance: 450, judgeUnits: 9, status: 202 },
 ])('protects provider judge reserve at balance $balance with judge liability $judgeUnits', async ({ balance, judgeUnits, status }) => {
   const e = env(); e.YOUCAM_MODE='live'; e.YOUCAM_API_KEY='synthetic';
-  if (judgeUnits) await e.DB.prepare("INSERT INTO reservations(id,pool,ip_hash,session_id,image_sha,day,units,status,created_at) VALUES('judge-held','judge','','','','',9,'abandoned',0)").bind().run();
+  if (judgeUnits) await e.DB.prepare("INSERT INTO reservations(id,pool,ip_hash,session_id,image_sha,day,units,status,created_at) VALUES('judge-held','judge','','','','',9,'spent',0)").bind().run();
   const credit = vi.spyOn(LiveAdapter.prototype, 'creditBalance').mockResolvedValue(balance);
   const submit = vi.spyOn(LiveAdapter.prototype, 'submit').mockResolvedValue({ providerTaskId:'synthetic' });
   expect((await handle(request(),e)).status).toBe(status);
@@ -461,6 +462,10 @@ it('cron erases expired digests and previous UTC day identifiers in both ledgers
   }
   for(const [id,day] of [['old',yesterday],['recent',today]]) await e.DB.prepare("INSERT INTO jobs(id,state,mode,created_at,updated_at,session_id,cleanup_status) VALUES(?,'failed','mock',?,?,'session','not_applicable')").bind(id,day+'T00:00:00.000Z',day+'T00:00:00.000Z').run();
   await scheduled({},e);
+  const writes = vi.spyOn(D1Executor.prototype, 'run');
+  await scheduled({},e);
+  expect(writes.mock.calls.length).toBeGreaterThan(0);
+  expect(await Promise.all(writes.mock.results.map(result => result.value))).toEqual(writes.mock.calls.map(() => 0));
   for(const table of ['reservations','mock_reservations']) {
     const rows=(await e.DB.prepare(`SELECT id,ip_hash,session_id,image_sha FROM ${table} WHERE id IN ('old','expired','recent') ORDER BY id`).bind().all()).results;
     expect(rows).toEqual([{id:'expired',ip_hash:'ip',session_id:'session',image_sha:''},{id:'old',ip_hash:'',session_id:'',image_sha:''},{id:'recent',ip_hash:'ip',session_id:'session',image_sha:'digest'}]);
@@ -474,4 +479,23 @@ it('cron selects live cleanup ahead of older mock backlog',async()=>{
   await scheduled({},e,{},async()=>{calls++;return Response.json({data:{}});});
   expect(calls).toBe(4);
   expect((await e.DB.prepare("SELECT id FROM deleted_jobs ORDER BY id").bind().all()).results).toEqual(['4','5','6','7'].map(id=>({id})));
+});
+
+it.each(['reserved', 'abandoned'])('protects provider reserve with %s non-judge runs and held judge units', async status => {
+  const e = env(); e.YOUCAM_MODE = 'live'; e.YOUCAM_API_KEY = 'synthetic';
+  for (const [id, pool] of [['nonjudge', 'dev'], ['judge', 'judge']])
+    await e.DB.prepare("INSERT INTO reservations(id,pool,ip_hash,session_id,image_sha,day,units,status,created_at) VALUES(?,?,'','','','',9,?,0)").bind(id, pool, status).run();
+  vi.spyOn(LiveAdapter.prototype, 'creditBalance').mockResolvedValue(467);
+  const submit = vi.spyOn(LiveAdapter.prototype, 'submit').mockResolvedValue({ providerTaskId: 'synthetic' });
+  expect((await handle(request(), e)).status).toBe(429);
+  expect(submit).not.toHaveBeenCalled();
+  expect((await e.DB.prepare('SELECT COUNT(*) count FROM reservations').bind().all()).results).toEqual([{ count: 3 }]);
+});
+it('serializes concurrent requests against the same uncharged provider balance', async () => {
+  const e = env(); e.YOUCAM_MODE = 'live'; e.YOUCAM_API_KEY = 'synthetic';
+  vi.spyOn(LiveAdapter.prototype, 'creditBalance').mockResolvedValue(467);
+  const submit = vi.spyOn(LiveAdapter.prototype, 'submit').mockResolvedValue({ providerTaskId: 'synthetic' });
+  const responses = await Promise.all(['parallel-session-0001', 'parallel-session-0002'].map(sessionId => handle(request({ sessionId }), e)));
+  expect(responses.map(response => response.status).sort()).toEqual([202, 429]);
+  expect(submit).toHaveBeenCalledOnce();
 });

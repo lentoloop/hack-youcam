@@ -215,11 +215,8 @@ export async function handle(request: Request, env: Env): Promise<Response> {
           : env.DEV_CODE && await codeMatches(meta.judgeCode, env.DEV_CODE)
             ? "dev"
             : "public";
-      if (adapter instanceof LiveAdapter && pool !== "judge") {
-        const judgeSpentOrHeld = 450 - (await budget.status()).remainingByPool.judge;
-        if (await adapter.creditBalance() - 9 < 460 - judgeSpentOrHeld)
-          return fail("quota_exhausted", "Analysis allowance is unavailable. Try a labeled sample.", 429);
-      }
+      const providerBalance = adapter instanceof LiveAdapter && pool !== "judge"
+        ? await adapter.creditBalance() : undefined;
       const reservation = await budget.reserve({
         pool,
         ipHash: await sha256(
@@ -228,7 +225,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
         sessionId: meta.sessionId,
         imageSha256: image.sha256,
         units: 9,
-      });
+      }, providerBalance);
       if (!reservation.ok)
         return fail(
           reservation.reason,
@@ -422,8 +419,8 @@ export async function scheduled(_event: unknown, env: Env, _ctx?: unknown, fetch
   const sql = new D1Executor(env.DB);
   const now = Date.now(), today = new Date(now).toISOString().slice(0, 10);
   for (const table of ["reservations", "mock_reservations"])
-    await sql.run(`UPDATE ${table} SET image_sha=CASE WHEN created_at<=? OR id IN (SELECT id FROM deleted_jobs) THEN '' ELSE image_sha END, ip_hash=CASE WHEN day<? THEN '' ELSE ip_hash END, session_id=CASE WHEN day<? THEN '' ELSE session_id END WHERE created_at<=? OR day<? OR id IN (SELECT id FROM deleted_jobs)`, [now-1800000, today, today, now-1800000, today]);
-  await sql.run("UPDATE jobs SET session_id='' WHERE substr(created_at,1,10)<?", [today]);
+    await sql.run(`UPDATE ${table} SET image_sha=CASE WHEN created_at<=? OR id IN (SELECT id FROM deleted_jobs) THEN '' ELSE image_sha END, ip_hash=CASE WHEN day<? THEN '' ELSE ip_hash END, session_id=CASE WHEN day<? THEN '' ELSE session_id END WHERE (image_sha!='' AND (created_at<=? OR id IN (SELECT id FROM deleted_jobs))) OR (day<? AND (ip_hash!='' OR session_id!=''))`, [now-1800000, today, today, now-1800000, today]);
+  await sql.run("UPDATE jobs SET session_id='' WHERE session_id!='' AND substr(created_at,1,10)<?", [today]);
   // Uncertain units remain held; only execution slots are reclaimed.
   for (const table of ['reservations', 'mock_reservations'])
     await sql.run(`UPDATE ${table} SET status='abandoned' WHERE status='reserved' AND created_at<=? AND NOT EXISTS(SELECT 1 FROM jobs WHERE jobs.id=${table}.id)`, [Date.now()-1800000]);

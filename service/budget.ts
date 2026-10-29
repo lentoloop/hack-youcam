@@ -33,6 +33,8 @@ export class D1Executor implements SqlExecutor {
     ).meta.changes;
   }
 }
+const providerHeadroom = `? - (SELECT COALESCE(SUM(units),0) FROM reservations WHERE pool!='judge' AND status IN ('reserved','abandoned'))
+  - ? >= 450 - (SELECT COALESCE(SUM(units),0) FROM reservations WHERE pool='judge' AND status='spent')`;
 const caps: Record<BudgetPool, number> = {
   judge: BUDGET.judgeReserveUnits,
   public: BUDGET.publicLiveCapUnits,
@@ -45,7 +47,7 @@ export class D1BudgetGuard implements BudgetGuard {
     private now = () => Date.now(),
     private jobMode?: "live" | "mock",
   ) {}
-  async reserve(r: ReservationRequest): Promise<ReservationResult> {
+  async reserve(r: ReservationRequest, providerBalance?: number): Promise<ReservationResult> {
     if (r.units !== BUDGET.unitsPerSdRun)
       return { ok: false, reason: "quota_exhausted" };
     const now = this.now(),
@@ -57,7 +59,8 @@ export class D1BudgetGuard implements BudgetGuard {
       NOT EXISTS(SELECT 1 FROM reservations WHERE session_id=? AND image_sha=? AND created_at>?)
       AND (SELECT COALESCE(SUM(units),0) FROM reservations WHERE pool=? AND status!='released')+?<=?
       AND (?='judge' OR (SELECT COUNT(*) FROM reservations WHERE ip_hash=? AND day=? AND pool!='judge')<?)
-      AND (SELECT COUNT(*) FROM reservations WHERE status='reserved' AND (pool='judge')=(?='judge'))<?`,
+      AND (SELECT COUNT(*) FROM reservations WHERE status='reserved' AND (pool='judge')=(?='judge'))<?
+      ${providerBalance === undefined ? '' : `AND (${providerHeadroom})`}`,
       args: [
         id,
         r.pool,
@@ -79,6 +82,7 @@ export class D1BudgetGuard implements BudgetGuard {
         BUDGET.maxLivePerIpPerDay,
         r.pool,
         BUDGET.maxConcurrentLive,
+        ...(providerBalance === undefined ? [] : [providerBalance, r.units]),
       ]};
     if (this.jobMode && this.sql.batch) {
       const stamp = new Date(now).toISOString();
@@ -94,6 +98,10 @@ export class D1BudgetGuard implements BudgetGuard {
         reservationId: rows[0].id,
         ...(rows[0].id !== id ? { deduplicatedJobId: rows[0].id } : {}),
       };
+    if (providerBalance !== undefined) {
+      const [credit] = await this.sql.all<{ available: number }>(`SELECT (${providerHeadroom}) available`, [providerBalance, r.units]);
+      if (!credit.available) return { ok: false, reason: 'quota_exhausted' };
+    }
     const status = await this.status();
     return {
       ok: false,

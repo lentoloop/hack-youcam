@@ -21,6 +21,7 @@ function request(pool: BudgetPool, suffix = crypto.randomUUID(), ipHash = suffix
 it('D1 exhausts dev/public while preserving all 450 judge units', async () => {
   const { db, guard } = await setup();
   expect(await guard.status()).toEqual({ spentUnits: 9, reservedUnits: 0, remainingByPool: { dev: 351, public: 180, judge: 450 } });
+  expect((await db.prepare('SELECT created_at FROM reservations').first<{ created_at: number }>())?.created_at).toBe(Date.parse('2026-10-25T19:18:00+08:00'));
   expect(await db.prepare('SELECT ip_hash,session_id,image_sha,status FROM reservations').first()).toEqual({ ip_hash: '', session_id: '', image_sha: '', status: 'spent' });
   for (const [pool, runs] of [['dev', 39], ['public', 20]] as const) {
     for (let i = 0; i < runs; i++) {
@@ -69,4 +70,22 @@ it('judges share NAT without public IP caps and have separate bounded concurrenc
   expect((await guard.reserve(request('judge', 'judge-c', ip))).ok).toBe(true);
   for (const row of others) if (row.ok) await guard.commit(row.reservationId);
   expect(await guard.reserve(request('public', 'public-ip-full', ip))).toEqual({ ok: false, reason: 'rate_limited' });
+});
+it('D1 reserves uncharged non-judge units atomically while preserving judge credit', async () => {
+  const { db, guard } = await setup();
+  const judge = await guard.reserve(request('judge'));
+  expect(judge.ok).toBe(true);
+  const results = await Promise.all([
+    guard.reserve(request('public'), 467),
+    guard.reserve(request('dev'), 467),
+  ]);
+  expect(results.filter(result => result.ok)).toHaveLength(1);
+  expect(results.filter(result => !result.ok)).toEqual([{ ok: false, reason: 'quota_exhausted' }]);
+  const held = results.find(result => result.ok);
+  if (!held?.ok) throw new Error('Expected a held non-judge reservation');
+  await guard.abandon(held.reservationId);
+  expect(await guard.reserve(request('public'), 467)).toEqual({ ok: false, reason: 'quota_exhausted' });
+  expect((await db.prepare("SELECT SUM(units) units FROM reservations WHERE pool!='judge' AND status IN ('reserved','abandoned')").first<{ units: number }>())?.units).toBe(9);
+  if (judge.ok) await guard.commit(judge.reservationId);
+  expect((await guard.reserve(request('public'), 467)).ok).toBe(true);
 });
