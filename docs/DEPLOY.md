@@ -9,13 +9,13 @@ Use Node.js 22.13 or newer and npm. Wrangler is included in the service devDepen
 ```sh
 export npm_config_cache=/tmp/breakout-npm-cache
 npm ci
-(cd service && npm install --ignore-scripts)
+(cd service && npm ci --ignore-scripts)
 (cd web && npm ci)
 (cd web && npm run build)
 bash scripts/verify-release.sh
 ```
 
-All checks must pass before deployment. On npm 11.21.1 with Node.js 24.22.1, the service install attempted an unnecessary better-sqlite3 source build and failed because `make` was unavailable. In that environment, use `npm ci --ignore-scripts --cache /tmp/breakout-npm-cache` in `service/`; the package includes prebuilt binaries. The service tests must still pass. If the default npm cache is read-only, set `npm_config_cache` to a writable temporary directory for all installs. Run the fresh migration check alone with `node scripts/verify-migrations.mjs`. It opens an empty temporary SQLite database, applies `0001.sql` through `0005.sql` in order, checks the final schema and integrity, and removes the database. It uses better-sqlite3 when installed, otherwise Node's built-in SQLite. It also verifies that migration 0005 records nine externally spent dev units. This checks SQL compatibility, not Cloudflare account configuration.
+All checks must pass before deployment. Use `npm ci --ignore-scripts` in `service/` because better-sqlite3 13 includes `prebuilds/linux-x64.node`; plain `npm ci` attempts a source build that fails on this box because `make` is unavailable. The service tests must still pass. If the default npm cache is read-only, set `npm_config_cache` to a writable temporary directory for all installs. Run the fresh migration check alone with `node scripts/verify-migrations.mjs`. It opens an empty temporary SQLite database, applies `0001.sql` through `0005.sql` in order, checks the final schema and integrity, and removes the database. It uses better-sqlite3 when installed, otherwise Node's built-in SQLite. It also verifies that migration 0005 records nine externally spent dev units. This checks SQL compatibility, not Cloudflare account configuration.
 
 ## 2. Create and bind D1
 
@@ -25,6 +25,8 @@ From `service/`, authenticate to the intended Cloudflare account and create a da
 npx --no-install wrangler login
 npx --no-install wrangler d1 create breakout-log
 ```
+
+From `service/`:
 
 Copy the complete checked-in configuration to the ignored local file `service/wrangler.deploy.toml`:
 
@@ -104,6 +106,10 @@ npx --no-install wrangler deploy --config wrangler.deploy.toml
 
 Open the `workers.dev` URL returned by Wrangler. Keep `YOUCAM_MODE = "mock"` for the initial smoke check. Static asset requests use Workers static asset serving. API requests and scheduled cleanup remain subject to the account's Workers and D1 free-plan limits.
 
+### Drain before switching mode
+
+Stop new POST `/api/analyses` requests before changing `YOUCAM_MODE`. Wait at least 30 minutes after the last POST, or confirm that no `jobs` rows remain in `queued` or `running` state. Keep the provider credentials and storage allowlist available until live jobs and cleanup finish. Then change the mode in the local deployment configuration and deploy. GET polling and accounting use each job's stored mode.
+
 ### Alternative: Pages with a custom domain
 
 If you have an owned Cloudflare zone, you can host the web on Pages and route that hostname's `/api/*` requests to the Worker. Separate Pages and `workers.dev` URLs do not provide this routing. The Vite proxy exists only for local development.
@@ -162,7 +168,7 @@ Confirm the public URLs no longer serve the app and that the database is absent 
 
 ## Dependency advisories
 
-Release preparation on 2026-10-29 retained Miniflare 4.20260730.0 and added overrides scoped to `miniflare` for `sharp` 0.35.5 and `undici` 7.30.1. This avoids npm's suggested breaking downgrade and preserves the `2026-07-30` compatibility date. The overrides also apply to Wrangler's nested Miniflare. Regenerate the lockfile with `npm_config_cache=/tmp/breakout-npm-cache npm install --ignore-scripts` from `service/`.
+Release preparation on 2026-10-29 retained Miniflare 4.20260730.0 and added overrides scoped to `miniflare` for `sharp` 0.35.5 and `undici` 7.30.1. This avoids npm's suggested breaking downgrade and preserves the `2026-07-30` compatibility date. Wrangler's own Miniflare 5.x already resolves sharp 0.35.5 and undici 7.30.1. To regenerate the lockfile, use `npm_config_cache=/tmp/breakout-npm-cache npm install --ignore-scripts` from `service/`, then run `npm ci --ignore-scripts`, verify, and commit the updated lockfile.
 
 `npm audit --json` reported the following counts in the root, `service/`, and `web/`, respectively:
 

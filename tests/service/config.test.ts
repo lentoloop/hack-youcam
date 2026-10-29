@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 it('deploy configuration binds DB and matches every local workerd compatibility date', () => {
   const config = readFileSync(new URL('../../service/wrangler.toml', import.meta.url), 'utf8');
   const date = config.match(/^compatibility_date = "([\d-]+)"$/m)?.[1];
@@ -20,4 +20,20 @@ it('serves the web SPA on workers.dev and runs the Worker only for API paths', (
   expect(assets).toMatch(/^run_worker_first = \["\/api\/\*"\]$/m);
   expect(assets).toMatch(/^not_found_handling = "single-page-application"$/m);
   expect(assets).not.toMatch(/^binding\s*=/m);
+});
+
+it('tracked configuration defaults to mock with bounded cleanup cron', () => {
+  const config = readFileSync(new URL('../../service/wrangler.toml', import.meta.url), 'utf8');
+  expect(config).toMatch(/^YOUCAM_MODE = "mock"$/m);
+  expect(config).toMatch(/^crons = \["\*\/15 \* \* \* \*"\]$/m);
+});
+
+const deployConfig = new URL('../../service/wrangler.deploy.toml', import.meta.url);
+it.skipIf(!existsSync(deployConfig))('local deploy configuration differs only in database ID and mode', () => {
+  const normalize = (config: string) => config
+    .replace(/^database_id\s*=.*$/gm, 'database_id = "<local>"')
+    .replace(/^YOUCAM_MODE\s*=.*$/gm, 'YOUCAM_MODE = "<local>"');
+  const tracked = readFileSync(new URL('../../service/wrangler.toml', import.meta.url), 'utf8');
+  const deployed = readFileSync(deployConfig, 'utf8');
+  expect(normalize(deployed) === normalize(tracked), 'Deploy configuration drifted beyond database_id and YOUCAM_MODE').toBe(true);
 });

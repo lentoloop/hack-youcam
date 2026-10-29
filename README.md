@@ -10,9 +10,11 @@ Use Node.js 22.13 or newer and npm. Install dependencies in each package:
 
 ```sh
 npm ci
-(cd service && npm ci)
+(cd service && npm ci --ignore-scripts)
 (cd web && npm ci)
 ```
+
+The service uses better-sqlite3 13's bundled `prebuilds/linux-x64.node`; skipping install scripts avoids a source build that requires `make` on this box.
 
 Run `npm run dev` in `service/` and `web/` in separate terminals. Open the Vite URL. Its development proxy forwards `/api` to the local service on port 8787. Local service startup creates ephemeral D1, applies all five migrations, and blocks outbound provider requests.
 
