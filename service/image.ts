@@ -48,6 +48,9 @@ export function jpegDimensions(b: Uint8Array): {
   }
   throw invalid();
 }
+const iccProfileSignature = new TextEncoder().encode("ICC_PROFILE\0");
+const adobeSignature = new TextEncoder().encode("Adobe");
+
 export function stripJpegMetadataInPlace(bytes: Uint8Array): Uint8Array {
   const invalid = () => new ServiceError("invalid_image", "Provide a valid JPEG within the SD image limits.");
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw invalid();
@@ -76,8 +79,11 @@ export function stripJpegMetadataInPlace(bytes: Uint8Array): Uint8Array {
     if (offset + 2 > bytes.length) throw invalid();
     const length = (bytes[offset] << 8) | bytes[offset + 1];
     if (length < 2 || offset + length > bytes.length) throw invalid();
+    const payload = bytes.subarray(offset + 2, offset + length);
     offset += length;
-    if ((marker < 0xe1 || marker > 0xef || marker === 0xe2 || marker === 0xee) && marker !== 0xfe) {
+    const colorSignature = marker === 0xe2 ? iccProfileSignature : marker === 0xee ? adobeSignature : undefined;
+    const keepColor = colorSignature !== undefined && colorSignature.every((byte, index) => payload[index] === byte);
+    if (((marker < 0xe1 || marker > 0xef) && marker !== 0xfe) || keepColor) {
       segments.push(bytes.subarray(start, offset));
     }
     if (marker === 0xda) {
@@ -87,6 +93,7 @@ export function stripJpegMetadataInPlace(bytes: Uint8Array): Uint8Array {
         if (offset === -1) throw invalid();
         let next = offset + 1;
         while (bytes[next] === 0xff) next++;
+        if (next > offset + 1 && bytes[next] === 0x00) throw invalid();
         if (bytes[next] === 0x00 || (bytes[next] >= 0xd0 && bytes[next] <= 0xd7)) {
           offset = next + 1;
           while (offset + 4 < bytes.length) {
