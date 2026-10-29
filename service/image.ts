@@ -48,10 +48,11 @@ export function jpegDimensions(b: Uint8Array): {
   }
   throw invalid();
 }
-function stripJpegMetadata(bytes: Uint8Array): Uint8Array {
+export function stripJpegMetadataInPlace(bytes: Uint8Array): Uint8Array {
   const invalid = () => new ServiceError("invalid_image", "Provide a valid JPEG within the SD image limits.");
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw invalid();
   const segments: Uint8Array[] = [bytes.subarray(0, 2)];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let offset = 2;
   while (offset < bytes.length) {
     const start = offset;
@@ -60,10 +61,13 @@ function stripJpegMetadata(bytes: Uint8Array): Uint8Array {
     const marker = bytes[offset++];
     if (marker === 0xd9) {
       segments.push(bytes.subarray(start, offset));
-      const clean = new Uint8Array(segments.reduce((size, segment) => size + segment.length, 0));
       let position = 0;
-      for (const segment of segments) { clean.set(segment, position); position += segment.length; }
-      return clean;
+      for (const segment of segments) {
+        const start = segment.byteOffset - bytes.byteOffset;
+        bytes.copyWithin(position, start, start + segment.length);
+        position += segment.length;
+      }
+      return bytes.subarray(0, position);
     }
     if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
       segments.push(bytes.subarray(start, offset));
@@ -73,17 +77,27 @@ function stripJpegMetadata(bytes: Uint8Array): Uint8Array {
     const length = (bytes[offset] << 8) | bytes[offset + 1];
     if (length < 2 || offset + length > bytes.length) throw invalid();
     offset += length;
-    if ((marker < 0xe1 || marker > 0xef) && marker !== 0xfe) {
+    if ((marker < 0xe1 || marker > 0xef || marker === 0xe2 || marker === 0xee) && marker !== 0xfe) {
       segments.push(bytes.subarray(start, offset));
     }
     if (marker === 0xda) {
       const scanStart = offset;
       while (offset < bytes.length) {
-        if (bytes[offset] !== 0xff) { offset++; continue; }
+        offset = bytes.indexOf(0xff, offset);
+        if (offset === -1) throw invalid();
         let next = offset + 1;
         while (bytes[next] === 0xff) next++;
         if (bytes[next] === 0x00 || (bytes[next] >= 0xd0 && bytes[next] <= 0xd7)) {
           offset = next + 1;
+          while (offset + 4 < bytes.length) {
+            const word = view.getUint32(offset);
+            const a = word >>> 24, b = (word >>> 16) & 255, c = (word >>> 8) & 255, d = word & 255;
+            if ((a === 255 && b !== 0 && (b & 0xf8) !== 0xd0) ||
+                (b === 255 && c !== 0 && (c & 0xf8) !== 0xd0) ||
+                (c === 255 && d !== 0 && (d & 0xf8) !== 0xd0) ||
+                (d === 255 && bytes[offset + 4] !== 0 && (bytes[offset + 4] & 0xf8) !== 0xd0)) break;
+            offset += 4;
+          }
           continue;
         }
         break;
@@ -100,7 +114,7 @@ export async function normalizeImage(file: File): Promise<NormalizedImage> {
     file.size === 0
   )
     throw new ServiceError("invalid_image", "Upload a JPEG of at most 5 MiB.");
-  const bytes = stripJpegMetadata(new Uint8Array(await file.arrayBuffer()));
+  const bytes = stripJpegMetadataInPlace(new Uint8Array(await file.arrayBuffer()));
   return {
     bytes,
     contentType: "image/jpeg",
