@@ -1,5 +1,6 @@
 import { SCORED_CONCERNS } from '../contracts/analysis';
 import type { BreakoutLog, BuildLog, CompareEntries, ParseLogFile } from '../contracts/log';
+export const CAUSE_CAVEAT = 'This log cannot tell which product, if any, caused the change.';
 const day = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().slice(0, 10) === s;
 export const compareEntries: CompareEntries = (a, b) => {
     if (!a.framing.userConfirmedSameFraming || !b.framing.userConfirmedSameFraming)
@@ -10,7 +11,7 @@ export const compareEntries: CompareEntries = (a, b) => {
 };
 export const buildLog: BuildLog = log => {
     const entries = [...log.entries].sort((a, b) => a.date.localeCompare(b.date));
-    const unknowns = [{ code: 'cause_not_determined' as const, text: 'This log cannot tell which product, if any, caused the change.' }];
+    const unknowns = [{ code: 'cause_not_determined' as const, text: CAUSE_CAVEAT }];
     const view: ReturnType<BuildLog> = { timeline: [...log.changes.map(change => ({ kind: 'change' as const, date: change.startedOn, change })), ...entries.map(entry => ({ kind: 'entry' as const, date: entry.date, entry }))].sort((a, b) => a.date.localeCompare(b.date)), unknowns };
     const baseline = entries.find(e => e.source === 'live');
     if (baseline)
@@ -40,7 +41,7 @@ export const parseLogFile: ParseLogFile = json => {
         const source = (x: unknown) => str(x) && ['live', 'sample', 'mock'].includes(x);
         const iso = (x: unknown) => str(x) && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(x) && day(x.slice(0, 10)) && Number.isFinite(Date.parse(x));
         const size = (x: unknown, fixed = false) => { const r = obj(x, ['w', 'h']); return num(r.w) && num(r.h) && Number.isInteger(r.w) && Number.isInteger(r.h) && Number(r.w) > 0 && Number(r.h) > 0 && (!fixed || (r.w === 600 && r.h === 800)); };
-        const r = obj(json, ['version', 'createdAt', 'changes', 'selfReport', 'entries']);
+        const r = obj(json, ['version', 'createdAt', 'changes', 'selfReport', 'entries'], ['ingredientNotes']);
         if (r.version !== 'breakout-log.v1' || !iso(r.createdAt))
             throw Error('Invalid version or date.');
         const s = obj(r.selfReport, ['areas', 'discomfort', 'reportedSevereSymptom']);
@@ -50,6 +51,11 @@ export const parseLogFile: ParseLogFile = json => {
             const v = obj(c, ['id', 'category', 'startedOn', 'active'], ['note']);
             if (!str(v.id, 64) || !str(v.category, 80) || !str(v.startedOn) || !day(v.startedOn) || !['yes', 'no', 'unknown'].includes(v.active as string) || ('note' in v && !str(v.note)))
                 throw Error('Invalid product change.');
+        }
+        if ('ingredientNotes' in r) for (const n of arr(r.ingredientNotes)) {
+            const v = obj(n, ['id', 'date', 'category', 'active', 'ingredients'], ['note', 'startedOn']);
+            if (!str(v.id, 64) || !v.id || !str(v.date) || !day(v.date) || !str(v.category, 80) || !v.category.trim() || !str(v.ingredients) || !['yes', 'no', 'unknown'].includes(v.active as string) || ('note' in v && !str(v.note)) || ('startedOn' in v && (!str(v.startedOn) || !day(v.startedOn))))
+                throw Error('Invalid ingredient note.');
         }
         for (const e of arr(r.entries)) {
             const v = obj(e, ['id', 'date', 'source', 'observations', 'zoneLabels', 'framing'], ['regions']);

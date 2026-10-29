@@ -14,6 +14,13 @@ export interface ProductChange {
   note?: string;
 }
 
+/** A dated, self-reported ingredient record. Stored and exported with the device log. */
+export interface IngredientNote extends Omit<ProductChange, 'startedOn'> {
+  date: string; // YYYY-MM-DD
+  ingredients: string;
+  startedOn?: string;
+}
+
 /** Location and discomfort come from the user, never from AI localisation claims. */
 export interface SelfReport {
   areas: string;
@@ -60,6 +67,7 @@ export interface BreakoutLog {
   changes: ProductChange[];
   selfReport: SelfReport;
   entries: LogEntry[];
+  ingredientNotes?: IngredientNote[];
 }
 
 export type UnknownCode =
