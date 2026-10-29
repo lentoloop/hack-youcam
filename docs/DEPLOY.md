@@ -141,6 +141,10 @@ curl -i 'https://<web-hostname>/api/analyses/release-check-missing'
 
 Expect HTTP 404 with a JSON `not_found` error, not static HTML. There is no `/health` endpoint. For the upload flow, use only an approved synthetic face in mock mode. Confirm the mock label, polling, result display, and per-job DELETE, then confirm GET returns 404. Do not change to live mode or run live smoke scripts without separate authorization and a budget check.
 
+The fixture `service/fixtures/synthetic-credit-response.json` is hand-written test data, not a verified live capture. No verified credit-response capture is checked into the repository. It tests parsing and summing `amount_dec` values only.
+
+Before switching to live mode, obtain separate authorization and check the budget. With approved credentials, call `/s2s/v1.0/client/credit` and confirm that the adapter's `creditBalance()` matches the balance in the provider console. Stop if they differ. Record the verification date and source when a redacted response is captured; do not treat the synthetic fixture as live evidence.
+
 ## 6. Roll back
 
 Record the Worker deployment ID before each release. For the Pages alternative, also record the Pages production deployment. From `service/`, inspect and restore the previous Worker version:

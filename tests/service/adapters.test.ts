@@ -171,7 +171,7 @@ it("deletes a provider task", async () => {
   expect(JSON.parse(calls[0].init.body)).toEqual({ task_id: "t" });
 });
 
-import creditResponse from "../../service/fixtures/live-credit-response.json";
+import creditResponse from "../../service/fixtures/synthetic-credit-response.json";
 import run2 from "../../service/fixtures/live-sample-result.json";
 import { run2Masks } from "../../service/fixtures/run2-masks";
 const pngs: Record<string, string> = { URL_4: run2Masks.acne!, URL_3: run2Masks.redness!, URL_6: run2Masks.t_zone!, URL_7: run2Masks.u_zone! };
@@ -360,7 +360,7 @@ it("checks a successful task for deletion without downloading masks", async () =
   expect(result).toMatchObject({ state: "succeeded", masks: {} });
   expect(calls).toEqual(["https://yce-api-01.makeupar.com/s2s/v2.0/task/skin-analysis/deleting-task"]);
 });
-it("sums both amount_dec rows from the verified live credit response shape", async () => {
+it("sums both amount_dec rows from a synthetic credit response", async () => {
   expect(creditResponse.results).toHaveLength(2);
   expect(typeof creditResponse.results[0].amount_dec).toBe("number");
   expect(typeof creditResponse.results[1].amount_dec).toBe("string");
