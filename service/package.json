@@ -25,5 +25,11 @@
     "undici": "^8.12.3",
     "vitest": "^4.1.12",
     "wrangler": "^4.155.0"
+  },
+  "overrides": {
+    "miniflare": {
+      "sharp": "0.35.5",
+      "undici": "7.30.1"
+    }
   }
 }
