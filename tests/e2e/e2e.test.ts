@@ -82,7 +82,7 @@ it('uploads two synthetic JPEGs, polls the real worker, builds and compares a po
   expect(buildLog(log).unknowns.map(u => u.code)).toEqual(['cause_not_determined', 'no_live_baseline']);
   expect(compareEntries(first, second)).toEqual({ rows: first.observations.map(o => ({ concern: o.concern, a: o, b: o })), zones: first.regions!.zones.map(z => ({ zone: z.zone, a: z, b: z })) });
   const text = render(log);
-  for (const value of ['Your breakout log', 'serum', 'Mock (test data)', 'acne: 40 | 40', 'Oily', 'Dry & Sensitive', 'Estimated by this app from the YouCam mask', 't_zone: marker blobs 7 | 7']) expect(text).toContain(value);
+  for (const value of ['Your breakout log', 'serum', 'Mock (test data)', 'Acne: 40 | 40', 'Oily', 'Dry & Sensitive', 'Estimated by this app from the YouCam mask', 'T-zone: marked spots 7 | 7']) expect(text).toContain(value);
   const exported = serializeLog(log);
   expect(exported).not.toMatch(/data:|https?:|providerTaskId|masks|photo/i);
   expect(parseLogFile(JSON.parse(exported))).toEqual({ ok: true, log });

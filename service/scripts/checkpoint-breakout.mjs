@@ -9,10 +9,10 @@ async function main() {
   const mock = process.env.MOCK === "1";
   const source = mock ? "mock" : "live";
   const compiled = await build({
-    stdin: { contents: `export { MockAdapter } from './service/adapters'; export { deriveRegions } from './shared/regions'; export { buildLog } from './shared/log'; export { renderResults } from './web/src/results'; export { serializeLog } from './web/src/log-file';`, resolveDir: new URL('../../', import.meta.url).pathname },
+    stdin: { contents: `export { MockAdapter } from './service/adapters'; export { deriveRegions } from './shared/regions'; export { buildLog } from './shared/log'; export { renderResults, displayScore } from './web/src/results'; export { serializeLog } from './web/src/log-file';`, resolveDir: new URL('../../', import.meta.url).pathname },
     bundle: true, write: false, platform: 'node', format: 'esm',
   });
-  const { MockAdapter, deriveRegions, buildLog, renderResults, serializeLog } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+  const { MockAdapter, deriveRegions, buildLog, renderResults, displayScore, serializeLog } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
   const input = mock ? await new MockAdapter().poll("mock:success") : JSON.parse(await readFile(resolve(process.env.IN ?? `${defaultDir}/run2-normalized.json`), 'utf8'));
   const check = (name, condition) => { console.log(`${condition ? 'PASS' : 'FAIL'} ${name}`); if (!condition) throw Error(name); };
   check(`${source} acne/redness/texture observations`, ['acne', 'redness', 'texture'].every(c => input.observations?.some(o => o.concern === c && o.source === source && Number.isFinite(o.rawScore))));
@@ -42,7 +42,9 @@ async function main() {
     const root = document.getElementById('results');
     renderResults(root, log);
     const text = root.textContent;
-    check('HTML contains scores', input.observations.every(o => text.includes(`${o.concern}: ${o.uiScore ?? o.rawScore} · raw score: ${o.rawScore}`)));
+    const concernLabel = { acne: 'Acne', redness: 'Redness', texture: 'Texture' };
+    const observationLines = [...root.querySelectorAll('.observation-line')].map(line => line.textContent);
+    check('HTML contains scores', input.observations.every(o => observationLines.includes(`${concernLabel[o.concern]}: ${displayScore(o.uiScore ?? o.rawScore)} · raw score ${displayScore(o.rawScore)}`)));
     check('HTML contains app-estimate label', text.includes('Estimated by this app from the YouCam mask, not a YouCam measurement'));
     check('HTML contains cause unknown text', view.unknowns.some(u => u.code === 'cause_not_determined' && text.includes(u.text)));
     const out = resolve(process.env.OUT_DIR ?? (mock ? '/tmp/breakout-checkpoint' : defaultDir));
