@@ -52,10 +52,14 @@ export const parseLogFile: ParseLogFile = json => {
             if (!str(v.id, 64) || !str(v.category, 80) || !str(v.startedOn) || !day(v.startedOn) || !['yes', 'no', 'unknown'].includes(v.active as string) || ('note' in v && !str(v.note)))
                 throw Error('Invalid product change.');
         }
+        const noteIds = new Set<string>();
         if ('ingredientNotes' in r) for (const n of arr(r.ingredientNotes)) {
             const v = obj(n, ['id', 'date', 'category', 'active', 'ingredients'], ['note', 'startedOn']);
             if (!str(v.id, 64) || !v.id || !str(v.date) || !day(v.date) || !str(v.category, 80) || !v.category.trim() || !str(v.ingredients) || !['yes', 'no', 'unknown'].includes(v.active as string) || ('note' in v && !str(v.note)) || ('startedOn' in v && (!str(v.startedOn) || !day(v.startedOn))))
                 throw Error('Invalid ingredient note.');
+            if (noteIds.has(v.id))
+                throw Error('Duplicate ingredient note ID.');
+            noteIds.add(v.id);
         }
         for (const e of arr(r.entries)) {
             const v = obj(e, ['id', 'date', 'source', 'observations', 'zoneLabels', 'framing'], ['regions']);

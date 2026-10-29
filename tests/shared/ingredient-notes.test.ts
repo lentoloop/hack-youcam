@@ -9,6 +9,10 @@ it('round trips notes additively and preserves bytes for logs without notes', ()
     const withNotes = { ...log, ingredientNotes: [note] };
     expect(parseLogFile(JSON.parse(serializeLog(withNotes)))).toEqual({ ok: true, log: withNotes });
 });
+it('rejects duplicate note IDs even when their dates and contents differ', () => {
+    const withNotes = { ...log, ingredientNotes: [note, { ...note, date: '2026-10-24', category: 'Lotion' }] };
+    expect(parseLogFile(JSON.parse(JSON.stringify(withNotes)))).toEqual({ ok: false, reason: 'Duplicate ingredient note ID.' });
+});
 it('rejects invalid note dates, text lengths, fields and active values', () => {
     for (const patch of [{ date: '2026-02-30' }, { date: '29/10/2026' }, { startedOn: '' }, { category: '' }, { category: 'x'.repeat(81) }, { ingredients: 'x'.repeat(501) }, { note: 'x'.repeat(501) }, { id: 'x'.repeat(65) }, { active: 'maybe' }, { source: 'live' }]) {
         expect(parseLogFile({ ...log, ingredientNotes: [{ ...note, ...patch }] }).ok).toBe(false);

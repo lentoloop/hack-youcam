@@ -70,8 +70,15 @@ export function renderIngredientNotes(root: HTMLElement, log: BreakoutLog, chang
         const value = (key: string) => String(data.get(key) ?? '').trim();
         const active = value('active');
         if (active !== 'yes' && active !== 'no' && active !== 'unknown') return;
-        const note: IngredientNote = { id: editingId ?? crypto.randomUUID(), date: value('date'), category: value('category'), active, ingredients: value('ingredients'), ...(value('note') ? { note: value('note') } : {}), ...(value('startedOn') ? { startedOn: value('startedOn') } : {}) };
-        const ingredientNotes = editingId ? (log.ingredientNotes ?? []).map(n => n.id === editingId ? note : n) : [...(log.ingredientNotes ?? []), note];
+        const ingredientNotes = [...(log.ingredientNotes ?? [])];
+        let id = editingId ?? crypto.randomUUID();
+        while (!editingId && ingredientNotes.some(n => n.id === id)) id = crypto.randomUUID();
+        const note: IngredientNote = { id, date: value('date'), category: value('category'), active, ingredients: value('ingredients'), ...(value('note') ? { note: value('note') } : {}), ...(value('startedOn') ? { startedOn: value('startedOn') } : {}) };
+        if (editingId) {
+            const index = ingredientNotes.findIndex(n => n.id === editingId);
+            if (index === -1) return;
+            ingredientNotes[index] = note;
+        } else ingredientNotes.push(note);
         const checked = parseLogFile({ ...log, ingredientNotes });
         if (!checked.ok) { status.textContent = 'Enter valid dates and text within the field limits.'; return; }
         log.ingredientNotes = ingredientNotes;
