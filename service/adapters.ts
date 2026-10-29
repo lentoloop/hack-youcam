@@ -19,6 +19,7 @@ export class ServiceError extends Error {
     message: string,
     public status = 400,
     public safeToRelease = false,
+    public fileCreated = false,
   ) {
     super(message);
   }
@@ -96,8 +97,33 @@ export class LiveAdapter implements SkinAnalysisAdapter {
       );
     return ((await res.json()) as any).data;
   }
+  async creditBalance(): Promise<number> {
+    try {
+      const res = await outboundFetch(this.fetcher, HOST + "/s2s/v1.0/client/credit", {
+        headers: { Authorization: ["Bearer", this.key].join(" ") },
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!res.ok) throw Error("Credit response failed");
+      const body: unknown = await res.json();
+      if (!body || typeof body !== "object") throw Error("Invalid credit response");
+      const data = "data" in body ? body.data : undefined;
+      const rows = "results" in body ? body.results : data && typeof data === "object" && "results" in data ? data.results : undefined;
+      if (!Array.isArray(rows) || !rows.length) throw Error("Missing credit rows");
+      let balance = 0;
+      for (const row of rows) {
+        const amount: unknown = row && typeof row === "object" && "amount_dec" in row ? row.amount_dec : undefined;
+        if ((typeof amount !== "string" && typeof amount !== "number") || String(amount).trim() === "" || !Number.isFinite(Number(amount)) || Number(amount) < 0)
+          throw Error("Invalid credit amount");
+        balance += Number(amount);
+      }
+      if (!Number.isFinite(balance)) throw Error("Invalid credit total");
+      return balance;
+    } catch {
+      throw new ServiceError("live_unavailable", "Provider balance is unavailable.", 503);
+    }
+  }
   async submit(image: NormalizedImage) {
-    let taskSubmissionStarted = false;
+    let taskSubmissionStarted = false, fileCreated = false;
     try {
       const data = await this.api("/s2s/v2.0/file", {
         files: [
@@ -108,6 +134,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
           },
         ],
       });
+      fileCreated = typeof data?.files?.[0]?.file_id === "string";
       const file = data?.files?.[0],
         instruction = file?.requests?.[0];
       if (!file?.file_id || !instruction?.url)
@@ -153,6 +180,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
           error instanceof ServiceError ? error.message : "Image upload could not be completed.",
           502,
           true,
+          fileCreated,
         );
       throw error;
     }

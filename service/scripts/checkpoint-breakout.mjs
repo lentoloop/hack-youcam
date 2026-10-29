@@ -6,14 +6,16 @@ import { JSDOM } from 'jsdom';
 
 const defaultDir = '/workspace/eng/spikes/youcam-breakout-20261025/live-smoke';
 async function main() {
-  const input = JSON.parse(await readFile(resolve(process.env.IN ?? `${defaultDir}/result.json`), 'utf8'));
+  const mock = process.env.MOCK === "1";
+  const source = mock ? "mock" : "live";
   const compiled = await build({
-    stdin: { contents: `export { deriveRegions } from './shared/regions'; export { buildLog } from './shared/log'; export { renderResults } from './web/src/results'; export { serializeLog } from './web/src/log-file';`, resolveDir: new URL('../../', import.meta.url).pathname },
+    stdin: { contents: `export { MockAdapter } from './service/adapters'; export { deriveRegions } from './shared/regions'; export { buildLog } from './shared/log'; export { renderResults } from './web/src/results'; export { serializeLog } from './web/src/log-file';`, resolveDir: new URL('../../', import.meta.url).pathname },
     bundle: true, write: false, platform: 'node', format: 'esm',
   });
-  const { deriveRegions, buildLog, renderResults, serializeLog } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+  const { MockAdapter, deriveRegions, buildLog, renderResults, serializeLog } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+  const input = mock ? await new MockAdapter().poll("mock:success") : JSON.parse(await readFile(resolve(process.env.IN ?? `${defaultDir}/result.json`), 'utf8'));
   const check = (name, condition) => { console.log(`${condition ? 'PASS' : 'FAIL'} ${name}`); if (!condition) throw Error(name); };
-  check('live acne/redness/texture observations', ['acne', 'redness', 'texture'].every(c => input.observations?.some(o => o.concern === c && o.source === 'live' && Number.isFinite(o.rawScore))));
+  check(`${source} acne/redness/texture observations`, ['acne', 'redness', 'texture'].every(c => input.observations?.some(o => o.concern === c && o.source === source && Number.isFinite(o.rawScore))));
   check('zoneLabels >= 1', Array.isArray(input.zoneLabels) && input.zoneLabels.length >= 1);
   const decode = async key => {
     const value = input.masks?.[key];
@@ -30,7 +32,7 @@ async function main() {
     version: 'breakout-log.v1', createdAt: today.toISOString(),
     changes: [{ id: 'example-change', category: 'retinoid serum (example)', startedOn: started.toISOString().slice(0, 10), active: 'yes' }],
     selfReport: { areas: 'cheeks and jaw (example)', discomfort: 'mild (example)', reportedSevereSymptom: false },
-    entries: [{ id: 'checkpoint-live', date: today.toISOString(), source: 'live', observations: input.observations, zoneLabels: input.zoneLabels, regions, framing: { guideShown: true, userConfirmedSameFraming: true, imageSize: { w: 600, h: 800 } } }],
+    entries: [{ id: `checkpoint-${source}`, date: today.toISOString(), source, observations: input.observations, zoneLabels: input.zoneLabels, regions, framing: { guideShown: true, userConfirmedSameFraming: true, imageSize: { w: 600, h: 800 } } }],
   };
   const view = buildLog(log), file = serializeLog(log);
   check('log-file excludes image data, URLs and provider IDs', !/data:|http|task_id|file_id/i.test(file));
@@ -43,7 +45,7 @@ async function main() {
     check('HTML contains scores', input.observations.every(o => text.includes(`${o.concern}: ${o.uiScore ?? o.rawScore} · raw score: ${o.rawScore}`)));
     check('HTML contains app-estimate label', text.includes('Estimated by this app from the YouCam mask, not a YouCam measurement'));
     check('HTML contains cause unknown text', view.unknowns.some(u => u.code === 'cause_not_determined' && text.includes(u.text)));
-    const out = resolve(process.env.OUT_DIR ?? defaultDir);
+    const out = resolve(process.env.OUT_DIR ?? (mock ? '/tmp/breakout-checkpoint' : defaultDir));
     await mkdir(out, { recursive: true });
     await writeFile(resolve(out, 'log-view.json'), JSON.stringify(view, null, 2) + '\n');
     await writeFile(resolve(out, 'log-file.json'), file + '\n');

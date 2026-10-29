@@ -1,4 +1,4 @@
-import { CONSENT_TEXT, CONSENT_TEXT_VERSION, type ConsentRecord } from '../../contracts/analysis';
+import { CONSENT_TEXT, CONSENT_TEXT_VERSION, type ConsentRecord, type ProviderCleanup } from '../../contracts/analysis';
 import type { BreakoutLog, ProductChange } from '../../contracts/log';
 import { createApi, AnalysisError } from './api';
 import { prepareImage } from './image';
@@ -16,6 +16,13 @@ const fresh = (): BreakoutLog => ({ version: 'breakout-log.v1', createdAt: new D
 let log = fresh(), consent: ConsentRecord | undefined, sessionId = crypto.randomUUID(), jobId: string | undefined, stopPoll: (() => void) | undefined, generation = 0, expires: ReturnType<typeof setTimeout> | undefined, pending: File | undefined, submittedFraming = false, submittedAt = '';
 const recordedJobs = new Set<string>();
 const cleanupIds = new Set<string>();
+const cleanupMessages: Record<ProviderCleanup, string> = {
+    deleted: 'Perfect Corp. confirmed deletion of the analysis and its input files.',
+    pending: 'Perfect Corp. cleanup is pending. Retry cleanup to check again.',
+    failed: 'Perfect Corp. cleanup failed. Retry cleanup to try again.',
+    not_applicable: 'No Perfect Corp. analysis needs cleanup.',
+    unknown_task: 'The app cannot yet confirm Perfect Corp. cleanup. Retry cleanup to check again. Uploaded files that cannot be deleted expire after 30 days.',
+};
 function error(e: unknown) { get('status').textContent = e instanceof Error ? e.message : 'Connection failed.'; get('resume').hidden = !jobId; if (e instanceof AnalysisError && e.code === 'not_found') {
     deleteCurrent();
     get('resume').hidden = true;
@@ -26,9 +33,8 @@ async function deleteCurrent(id = jobId) { if (!id) return;
     cleanupIds.add(id);
     try {
         const result = await api.delete(id);
-        get('status').textContent = `Deleted here. Perfect Corp. cleanup: ${result.provider}. Perfect Corp. documents that task deletion removes its input files; anything not deleted expires after 30 days.`;
-        get('retry-delete').hidden = !['failed', 'pending'].includes(result.provider);
-        if (!['failed', 'pending'].includes(result.provider)) { cleanupIds.delete(id); if (jobId === id) jobId = undefined; }
+        get('status').textContent = `Deleted here. ${cleanupMessages[result.provider]}`;
+        if (result.provider === 'deleted' || result.provider === 'not_applicable') { cleanupIds.delete(id); if (jobId === id) jobId = undefined; }
         get('retry-delete').hidden = cleanupIds.size === 0;
     } catch (e) { get('retry-delete').hidden = false; get('status').textContent = e instanceof Error ? e.message : 'Cleanup request failed. Retry cleanup.'; }
 }

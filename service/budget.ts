@@ -56,8 +56,8 @@ export class D1BudgetGuard implements BudgetGuard {
       SELECT ?,?,?,?,?,?,?,? WHERE
       NOT EXISTS(SELECT 1 FROM reservations WHERE session_id=? AND image_sha=? AND created_at>?)
       AND (SELECT COALESCE(SUM(units),0) FROM reservations WHERE pool=? AND status!='released')+?<=?
-      AND (SELECT COUNT(*) FROM reservations WHERE ip_hash=? AND day=?)<2
-      AND (SELECT COUNT(*) FROM reservations WHERE status='reserved')<2`,
+      AND (?='judge' OR (SELECT COUNT(*) FROM reservations WHERE ip_hash=? AND day=? AND pool!='judge')<?)
+      AND (SELECT COUNT(*) FROM reservations WHERE status='reserved' AND (pool='judge')=(?='judge'))<?`,
       args: [
         id,
         r.pool,
@@ -73,8 +73,12 @@ export class D1BudgetGuard implements BudgetGuard {
         r.pool,
         r.units,
         caps[r.pool],
+        r.pool,
         r.ipHash,
         day,
+        BUDGET.maxLivePerIpPerDay,
+        r.pool,
+        BUDGET.maxConcurrentLive,
       ]};
     if (this.jobMode && this.sql.batch) {
       const stamp = new Date(now).toISOString();
@@ -170,13 +174,14 @@ export class MemoryBudgetGuard implements BudgetGuard {
     )
       return { ok: false, reason: "quota_exhausted" };
     if (
-      this.rows.filter((x) => x.status === "reserved").length >= 2 ||
-      this.rows.filter(
+      this.rows.filter((x) => x.status === "reserved" && (x.pool === "judge") === (r.pool === "judge")).length >= BUDGET.maxConcurrentLive ||
+      (r.pool !== "judge" && this.rows.filter(
         (x) =>
+          x.pool !== "judge" &&
           x.ipHash === r.ipHash &&
           new Date(x.at).toISOString().slice(0, 10) ===
             new Date(at).toISOString().slice(0, 10),
-      ).length >= 2
+      ).length >= BUDGET.maxLivePerIpPerDay)
     )
       return { ok: false, reason: "rate_limited" };
     const id = crypto.randomUUID();

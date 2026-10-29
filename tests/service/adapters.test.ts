@@ -315,3 +315,36 @@ it('omits redirected masks without following or losing scores', async () => {
 it.each(['', ' ', '.', ' , . , ', '*', '*.example.com', 'example.com,*', '..', 'https://example.com'])('rejects malformed live allowlist %s', suffixes => {
   expect(() => createAdapter({ YOUCAM_MODE: 'live', YOUCAM_API_KEY: 'synthetic', YOUCAM_STORAGE_HOST_SUFFIXES: suffixes } as any)).toThrow('allowlist');
 });
+
+it.each([
+  { results: [{ amount_dec: '980' }, { amount_dec: 6 }] },
+  { data: { results: [{ amount_dec: '986' }] } },
+])('parses provider credit without exposing or following another host', async body => {
+  let calls=0;
+  const adapter=new LiveAdapter('synthetic',async (url,init)=>{
+    calls++;
+    expect(url).toBe('https://yce-api-01.makeupar.com/s2s/v1.0/client/credit');
+    expect(init?.redirect).toBe('manual');
+    expect(init?.method).toBeUndefined();
+    return Response.json(body);
+  });
+  expect(await adapter.creditBalance()).toBe(986);
+  expect(calls).toBe(1);
+});
+it.each([null, {}, {results:[]}, {results:[null]}, {results:[{amount_dec:''}]}, {results:[{amount_dec:null}]}, {results:[{amount_dec:-1}]}, {results:[{amount_dec:'NaN'}]}])('fails closed for malformed credit %j', async body => {
+  const adapter=new LiveAdapter('synthetic',async()=>Response.json(body));
+  await expect(adapter.creditBalance()).rejects.toMatchObject({code:'live_unavailable',status:503});
+});
+it.each([503,307])('fails closed for credit HTTP %s without another request',async status=>{
+  let calls=0;
+  const adapter=new LiveAdapter('synthetic',async()=>{calls++;return new Response(null,{status});});
+  await expect(adapter.creditBalance()).rejects.toMatchObject({code:'live_unavailable',status:503});
+  expect(calls).toBe(1);
+});
+it('tracks an allocated provider file even when its upload response is lost',async()=>{
+  const adapter=new LiveAdapter('synthetic',async url=>{
+    if(String(url).endsWith('/file'))return Response.json({data:{files:[{file_id:'synthetic-file',requests:[{url:'https://storage.example.com/upload'}]}]}});
+    throw Error('Synthetic upload connection failure');
+  },'storage.example.com');
+  await expect(adapter.submit(image)).rejects.toMatchObject({safeToRelease:true,fileCreated:true});
+});

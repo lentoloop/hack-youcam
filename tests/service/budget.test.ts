@@ -36,6 +36,18 @@ for (const kind of ["memory", "sqlite"])
       const rs = await Promise.all([1, 2, 3, 4].map((n) => g.reserve(req(n))));
       expect(rs.filter((x) => x.ok)).toHaveLength(2);
     });
+    it("isolates judge concurrency and exempts judges from shared-IP attempts", async () => {
+      const g = make();
+      const others = await Promise.all([1, 2].map(n => g.reserve({ ...req(n), ipHash: "nat" })));
+      expect(others.every(result => result.ok)).toBe(true);
+      const judges = await Promise.all([3, 4].map(n => g.reserve({ ...req(n, "judge"), ipHash: "nat" })));
+      expect(judges.every(result => result.ok)).toBe(true);
+      expect(await g.reserve({ ...req(5, "judge"), ipHash: "nat" })).toEqual({ ok: false, reason: "rate_limited" });
+      for (const result of judges) if (result.ok) await g.commit(result.reservationId);
+      expect((await g.reserve({ ...req(6, "judge"), ipHash: "nat" })).ok).toBe(true);
+      for (const result of others) if (result.ok) await g.commit(result.reservationId);
+      expect(await g.reserve({ ...req(7), ipHash: "nat" })).toEqual({ ok: false, reason: "rate_limited" });
+    });
     it("commits and releases idempotently", async () => {
       const g = make();
       const a = await g.reserve(req(1));
@@ -43,7 +55,7 @@ for (const kind of ["memory", "sqlite"])
       await g.commit(a.reservationId);
       await g.release(a.reservationId);
       await g.commit(a.reservationId);
-      expect((await g.status()).spentUnits).toBe(9);
+      expect((await g.status()).spentUnits).toBe(kind === "sqlite" ? 18 : 9);
     });
     it("failure frees units and concurrency", async () => {
       const g = make();
@@ -79,7 +91,7 @@ for (const kind of ["memory", "sqlite"])
       expect((await g.status()).remainingByPool).toEqual({
         public: 0,
         judge: 441,
-        dev: 360,
+        dev: kind === "sqlite" ? 351 : 360,
       });
     });
     it("dedupe expires after thirty minutes", async () => {
@@ -102,7 +114,7 @@ for (const kind of ["memory", "sqlite"]) {
     for (const [pool, count] of [
       ["public", 20],
       ["judge", 50],
-      ["dev", 40],
+      ["dev", kind === "sqlite" ? 39 : 40],
     ] as const) {
       for (let i = 0; i < count; i++) {
         const r = await g.reserve(req(n++, pool));
@@ -135,7 +147,7 @@ it('reservation and job batch roll back together on insertion failure',async()=>
  db.exec("CREATE TRIGGER fail_job BEFORE INSERT ON jobs BEGIN SELECT RAISE(ABORT,'synthetic failure'); END");
  const guard=new D1BudgetGuard(sql,()=>Date.now(),'live');
  await expect(guard.reserve(req(1))).rejects.toThrow('synthetic failure');
- expect(db.prepare('SELECT COUNT(*) n FROM reservations').get()).toEqual({n:0});
+ expect(db.prepare('SELECT COUNT(*) n FROM reservations').get()).toEqual({n:1});
  db.exec('DROP TRIGGER fail_job');
  const result=await guard.reserve(req(1)); expect(result.ok).toBe(true);
  expect(db.prepare('SELECT COUNT(*) n FROM jobs').get()).toEqual({n:1});

@@ -18,9 +18,9 @@ let id: string;
 let log: BreakoutLog;
 beforeAll(async () => {
   const bundle = await build({ entryPoints: ['worker.ts'], bundle: true, write: false, format: 'esm', platform: 'browser' });
-  mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-05-03', d1Databases: ['DB'], bindings: { YOUCAM_MODE: 'mock', IP_HASH_SECRET: 'synthetic-local-test-salt' }, outboundService: () => { throw new Error('External network forbidden'); } });
+  mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-07-30', d1Databases: ['DB'], bindings: { YOUCAM_MODE: 'mock', IP_HASH_SECRET: 'synthetic-local-test-salt' }, outboundService: () => { throw new Error('External network forbidden'); } });
   const db = await mf.getD1Database('DB');
-  for (const name of ['0001.sql', '0002.sql', '0003.sql', '0004.sql']) {
+  for (const name of ['0001.sql', '0002.sql', '0003.sql', '0004.sql', '0005.sql']) {
     const sql = readFileSync(new URL(`../../service/migrations/${name}`, import.meta.url), 'utf8');
     for (const statement of sql.replace(/--[^\n]*/g, '').split(';').filter(s => s.trim())) await db.prepare(statement).run();
   }
@@ -103,13 +103,14 @@ it('DELETE removes results; GET and second DELETE return uniform not_found', asy
 });
 it.each([false, true])('real worker attempts provider task/delete; failure=%s still deletes locally', async fails => {
   const calls: { url: string; method: string; body: unknown }[] = [];
-  const provider = new Miniflare({ modules: true, script: (await build({ entryPoints: ['worker.ts'], bundle: true, write: false, format: 'esm', platform: 'browser' })).outputFiles[0].text, compatibilityDate: '2026-05-03', d1Databases: ['DB'], bindings: { YOUCAM_MODE: 'live', YOUCAM_API_KEY: 'synthetic-test-only', YOUCAM_STORAGE_HOST_SUFFIXES: 'storage.example.com' }, outboundService: async request => {
-    calls.push({ url: request.url, method: request.method, body: await request.json() });
+  const provider = new Miniflare({ modules: true, script: (await build({ entryPoints: ['worker.ts'], bundle: true, write: false, format: 'esm', platform: 'browser' })).outputFiles[0].text, compatibilityDate: '2026-07-30', d1Databases: ['DB'], bindings: { YOUCAM_MODE: 'live', YOUCAM_API_KEY: 'synthetic-test-only', YOUCAM_STORAGE_HOST_SUFFIXES: 'storage.example.com' }, outboundService: async request => {
+    calls.push({ url: request.url, method: request.method, body: request.method === "POST" ? await request.json() : undefined });
+    if (request.method === 'GET') return Response.json({ data: { task_status: 'running' } });
     return new Response('{}', { status: fails ? 503 : 200 });
   } });
   try {
     const db = await provider.getD1Database('DB');
-    for (const name of ['0001.sql', '0002.sql', '0003.sql', '0004.sql']) {
+    for (const name of ['0001.sql', '0002.sql', '0003.sql', '0004.sql', '0005.sql']) {
       const sql = readFileSync(new URL(`../../service/migrations/${name}`, import.meta.url), 'utf8');
       for (const statement of sql.replace(/--[^\n]*/g, '').split(';').filter(s => s.trim())) await db.prepare(statement).run();
     }
@@ -117,7 +118,7 @@ it.each([false, true])('real worker attempts provider task/delete; failure=%s st
     const now = new Date().toISOString();
     await db.prepare('INSERT INTO jobs(id,state,mode,created_at,updated_at,session_id,provider_task_id) VALUES(?,?,?,?,?,?,?)').bind('cleanup', 'running', 'live', now, now, 'synthetic', 'synthetic-provider-task').run();
     expect((await provider.dispatchFetch('http://local/api/analyses/cleanup', { method: 'DELETE' })).status).toBe(200);
-    expect(calls).toEqual([{ url: 'https://yce-api-01.makeupar.com/s2s/v2.0/task/delete', method: 'POST', body: { task_id: 'synthetic-provider-task' } }]);
+    expect(calls).toEqual([{ url: 'https://yce-api-01.makeupar.com/s2s/v2.0/task/skin-analysis/synthetic-provider-task', method: 'GET', body: undefined }, { url: 'https://yce-api-01.makeupar.com/s2s/v2.0/task/delete', method: 'POST', body: { task_id: 'synthetic-provider-task' } }]);
     for (const method of ['GET']) {
       const response = await provider.dispatchFetch('http://local/api/analyses/cleanup', { method });
       expect(response.status).toBe(404);
@@ -139,7 +140,7 @@ it('workerd accepts real outbound init and rejects redirects with exactly one di
     } };
   `, resolveDir: process.cwd() }, bundle: true, write: false, format: 'esm', platform: 'browser' });
   const calls: string[] = [];
-  const runtime = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-05-03', outboundService: async request => {
+  const runtime = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-07-30', outboundService: async request => {
     calls.push(request.url);
     const body = await request.json() as { task_id: string };
     return body.task_id === '/success' ? Response.json({ data: {} })
@@ -154,3 +155,35 @@ it('workerd accepts real outbound init and rejects redirects with exactly one di
     expect(calls).toEqual(Array(2).fill('https://yce-api-01.makeupar.com/s2s/v2.0/task/delete'));
   } finally { await runtime.dispose(); }
 });
+
+it('two parallel GET polls use independent workerd responses and only one provider poll', async () => {
+  let started!: () => void, finish!: () => void;
+  const polling = new Promise<void>(resolve => { started = resolve; });
+  const release = new Promise<void>(resolve => { finish = resolve; });
+  let calls = 0;
+  const runtime = new Miniflare({ modules: true, script: (await build({ entryPoints: ['worker.ts'], bundle: true, write: false, format: 'esm', platform: 'browser' })).outputFiles[0].text, compatibilityDate: '2026-07-30', d1Databases: ['DB'], bindings: { YOUCAM_MODE: 'live', YOUCAM_API_KEY: 'synthetic', YOUCAM_STORAGE_HOST_SUFFIXES: 'storage.example.com' }, outboundService: async request => {
+    expect(request.url).toBe('https://yce-api-01.makeupar.com/s2s/v2.0/task/skin-analysis/synthetic-parallel');
+    calls++;
+    started();
+    await release;
+    return Response.json({ data: { task_status: 'success', results: { output: [] } } });
+  } });
+  try {
+    const db = await runtime.getD1Database('DB');
+    for (const name of ['0001.sql', '0002.sql', '0003.sql', '0004.sql', '0005.sql'])
+      for (const sql of readFileSync(new URL(`../../service/migrations/${name}`, import.meta.url), 'utf8').replace(/--[^\n]*/g, '').split(';').filter(s => s.trim())) await db.prepare(sql).run();
+    const now = new Date().toISOString(), old = new Date(Date.now()-11000).toISOString();
+    await db.prepare("INSERT INTO jobs(id,state,mode,created_at,updated_at,session_id,provider_task_id) VALUES('parallel','running','live',?,?,'synthetic','synthetic-parallel')").bind(now, old).run();
+    const first = runtime.dispatchFetch('http://local/api/analyses/parallel');
+    await polling;
+    const second = runtime.dispatchFetch('http://local/api/analyses/parallel');
+    const timer = setTimeout(finish, 100);
+    const responses = await Promise.all([first, second]);
+    clearTimeout(timer);
+    expect(responses.map(response => response.status)).toEqual([200, 200]);
+    const bodies = await Promise.all(responses.map(response => response.json())) as { job: { state: string } }[];
+    expect(bodies[0].job.state).toBe('succeeded');
+    expect(['running', 'succeeded']).toContain(bodies[1].job.state);
+    expect(calls).toBe(1);
+  } finally { finish(); await runtime.dispose(); }
+}, 10000);

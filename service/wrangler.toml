@@ -1,11 +1,15 @@
 name = "before-another-bottle"
 main = "worker.ts"
-compatibility_date = "2026-10-24"
+compatibility_date = "2026-07-30"
 [vars]
 YOUCAM_MODE = "mock"
 # Provider storage host observed in the 10/24 18:33 live smoke (upload PUT + all 4 mask GETs). Live mode fails closed without it.
 YOUCAM_STORAGE_HOST_SUFFIXES = "yce-us.s3-accelerate.amazonaws.com"
-# Bind an existing D1 database as DB before deployment. No database is provisioned here.
+# Release preparation must replace this local-only ID with the existing D1 database ID.
+[[d1_databases]]
+binding = "DB"
+database_name = "breakout-log"
+database_id = "00000000-0000-0000-0000-000000000000"
 
 [triggers]
 crons = ["*/15 * * * *"]

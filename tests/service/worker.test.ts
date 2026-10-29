@@ -5,7 +5,9 @@ import {
   expect,
   vi,
   afterEach,
+  beforeEach,
 } from "../../service/node_modules/vitest";
+import { LiveAdapter } from "../../service/adapters";
 import { handle, scheduled, type Env } from "../../service/worker";
 import { CONSENT_TEXT_VERSION } from "../../contracts";
 import { database, jpeg } from "./helpers";
@@ -16,11 +18,12 @@ function env(): Env {
     YOUCAM_MODE: "mock",
     IP_HASH_SECRET: "test-only-synthetic-salt",
     DB: {
-      async batch(statements: any[]) { return Promise.all(statements.map(s => s.run())); },
+      async batch(statements: any[]) { return db.transaction(() => statements.map(s => s.execute()))(); },
       prepare(query: string) {
         return {
           bind(...args: any[]) {
             return {
+              execute() { return { meta: { changes: db.prepare(query).run(...args).changes } }; },
               async all() {
                 return { results: db.prepare(query).all(...args) };
               },
@@ -59,7 +62,11 @@ function request(overrides: any = {}, bytes = jpeg(), type = "image/jpeg") {
     headers: { "CF-Connecting-IP": "192.0.2.1" },
   });
 }
-afterEach(() => vi.useRealTimers());
+beforeEach(() => {
+  vi.spyOn(LiveAdapter.prototype, "creditBalance").mockResolvedValue(986);
+  vi.spyOn(LiveAdapter.prototype, "poll").mockResolvedValue({ state: "running" });
+});
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 describe("Worker API using SQLite and synthetic SOF headers", () => {
   it("consent errors are uniform", async () => {
     const r = await handle(request({ consent: { granted: false } }), env());
@@ -151,11 +158,12 @@ it("mock runs consume only the mock ledger", async () => {
   const { db } = database();
   const e = env();
   e.DB = {
-    async batch(statements: any[]) { return Promise.all(statements.map(s => s.run())); },
+    async batch(statements: any[]) { return db.transaction(() => statements.map(s => s.execute()))(); },
     prepare(query: string) {
       return {
         bind(...args: any[]) {
           return {
+            execute() { return { meta: { changes: db.prepare(query).run(...args).changes } }; },
             async all() {
               return { results: db.prepare(query).all(...args) };
             },
@@ -178,7 +186,7 @@ it("mock runs consume only the mock ledger", async () => {
       .get(),
   ).toEqual({ units: 9 });
   expect(db.prepare("SELECT COUNT(*) count FROM reservations").get()).toEqual({
-    count: 0,
+    count: 1,
   });
 });
 it.each([false, true])('deletes completed=%s jobs and preserves accounting', async (completed) => {
@@ -190,8 +198,7 @@ it.each([false, true])('deletes completed=%s jobs and preserves accounting', asy
   const query = () => e.DB.prepare('SELECT * FROM mock_reservations').bind().all();
   const before = await query();
   expect((await handle(new Request(url, { method: 'DELETE' }), e)).status).toBe(200);
-  if (completed) expect(await query()).toEqual(before);
-  else expect(JSON.stringify(await query())).toContain('abandoned');
+  expect((await query()).results).toEqual(before.results.map((row: any) => ({ ...row, image_sha: "", status: "spent" })));
   for (const method of ['GET']) {
     const response = await handle(new Request(url, { method }), e);
     expect(response.status).toBe(404);
@@ -211,6 +218,7 @@ it('does not restore observations when a poll finishes after DELETE', async () =
     vi.advanceTimersByTime(10001);
     const pending = handle(new Request(url), e);
     await vi.waitFor(() => expect(poll).toHaveBeenCalled());
+    poll.mockResolvedValueOnce({ state: 'running' });
     expect((await handle(new Request(url, { method: 'DELETE' }), e)).status).toBe(200);
     resolve({ state: 'succeeded', observations: [{ concern: 'acne', rawScore: 40, source: 'mock' }], zoneLabels: [], masks: {} });
     expect((await pending).status).toBe(404);
@@ -247,7 +255,7 @@ it('sweep retries cleanup with fake fetch, nulls handles, abandons slots and mar
   const now = new Date(Date.now()-1900000).toISOString();
   for (const id of ['a','b','unknown']) {
     await e.DB.prepare("INSERT INTO jobs(id,state,mode,created_at,updated_at,session_id,provider_task_id,submit_started) VALUES(?,'running','live',?,?,?, ?,1)").bind(id,now,now,id,id === 'unknown' ? null : id).run();
-    await e.DB.prepare("INSERT INTO reservations(id,pool,ip_hash,session_id,image_sha,day,units,created_at) VALUES(?,'public',?,?,?,'2026-10-24',9,0)").bind(id,id,id,id).run();
+    await e.DB.prepare("INSERT INTO reservations(id,pool,ip_hash,session_id,image_sha,day,units,created_at) VALUES(?,'public',?,?,?,'2026-07-30',9,0)").bind(id,id,id,id).run();
   }
   const bad = vi.fn(async () => new Response('{}', {status:503}));
   await scheduled({},e,{},bad as typeof fetch);
@@ -271,7 +279,7 @@ it('privacy document contains exact frozen consent', async () => {
   const { CONSENT_TEXT } = await import('../../contracts');
   expect(readFileSync(new URL('../../docs/PRIVACY.md',import.meta.url),'utf8')).toContain(CONSENT_TEXT);
 });
-it('two public DELETEs free judge concurrency without returning held units', async () => {
+it('two public DELETEs settle completed provider units and preserve judge capacity', async () => {
   const e = env();
   const ids: string[] = [];
   for (const sessionId of ['public-session-0001', 'public-session-0002']) {
@@ -282,7 +290,7 @@ it('two public DELETEs free judge concurrency without returning held units', asy
   const { D1BudgetGuard, D1Executor } = await import('../../service/budget');
   const sql = new D1Executor(e.DB);
   const g = new D1BudgetGuard({all:(q,a)=>sql.all(q.replaceAll('reservations','mock_reservations'),a),run:(q,a)=>sql.run(q.replaceAll('reservations','mock_reservations'),a)});
-  expect((await g.status()).reservedUnits).toBe(18);
+  expect((await g.status()).spentUnits).toBe(18);
   expect((await g.status()).remainingByPool.judge).toBe(450);
   expect((await g.reserve({pool:'judge',ipHash:'judge',sessionId:'judge',imageSha256:'judge',units:9})).ok).toBe(true);
 });
@@ -338,7 +346,7 @@ it('submission observes cancellation after recording its late handle', async () 
 });
 it.each(['reservations','mock_reservations'])('sweep abandons interrupted %s while retaining held units',async table=>{
   const e=env();
-  for(const id of ['orphan-a','orphan-b']) await e.DB.prepare(`INSERT INTO ${table}(id,pool,ip_hash,session_id,image_sha,day,units,created_at) VALUES(?,'public',?,?,?,'2026-10-24',9,0)`).bind(id,id,id,id).run();
+  for(const id of ['orphan-a','orphan-b']) await e.DB.prepare(`INSERT INTO ${table}(id,pool,ip_hash,session_id,image_sha,day,units,created_at) VALUES(?,'public',?,?,?,'2026-07-30',9,0)`).bind(id,id,id,id).run();
   await scheduled({},e,{},async()=>{throw Error('No provider call expected');});
   const {D1BudgetGuard,D1Executor}=await import('../../service/budget'); const sql=new D1Executor(e.DB);
   const guard=new D1BudgetGuard({all:(q,a)=>sql.all(q.replaceAll('reservations',table),a),run:(q,a)=>sql.run(q.replaceAll('reservations',table),a)});
@@ -353,13 +361,13 @@ it.each(['failure', 'redirect', 'redirect-race'])('enforces sweep SQL and extern
   e.DB.prepare=((q:string)=>({bind(...a:any[]){
     const statement=original(q).bind(...a);
     const count=()=>{expect(++queries).toBeLessThanOrEqual(50);expect(++subrequests).toBeLessThanOrEqual(50);};
-    return {async all(){count();return statement.all();},async run(){count();
+    return {execute(){count();return (statement as any).execute();},async all(){count();return statement.all();},async run(){count();
       // Every final CAS loses to a newer submission generation.
       if(scenario !== 'redirect' && q.startsWith('UPDATE jobs SET cleanup_status=')) await original('UPDATE jobs SET submission_generation=submission_generation+1 WHERE id=?').bind(a[2]).run();
       return statement.run();}};
   }})) as any;
   let external=0;
-  const { MockAgent, fetch: offlineFetch } = createRequire(import.meta.url)('undici');
+  const { MockAgent, fetch: offlineFetch } = createRequire(new URL('../../service/package.json', import.meta.url))('undici');
   const agent = new MockAgent(); agent.disableNetConnect();
   const pool = agent.get('https://yce-api-01.makeupar.com');
   // A default-follow fetch would dispatch 21 requests for each call.
@@ -379,8 +387,8 @@ it.each(['failure', 'redirect', 'redirect-race'])('enforces sweep SQL and extern
     });
   } finally {await agent.close();}
   const raced=scenario!=='redirect';
-  expect(queries).toBe(raced?35:19); expect(calls).toBe(raced?8:4);
-  expect(subrequests).toBe(raced?43:23);
+  expect(queries).toBe(raced?38:22); expect(calls).toBe(raced?8:4);
+  expect(subrequests).toBe(raced?46:26);
   if(scenario!=='failure') expect(external).toBe(calls);
   const rows=(await original("SELECT cleanup_status,provider_task_id FROM jobs WHERE id IN (SELECT id FROM deleted_jobs)").bind().all()).results;
   expect(rows).toHaveLength(4);
@@ -389,4 +397,81 @@ it.each(['failure', 'redirect', 'redirect-race'])('enforces sweep SQL and extern
 it.each([undefined,'', ' , ', '.', ' , . '])('live fails closed for allowlist %s',async suffixes=>{
  const e=env(); e.YOUCAM_MODE='live';e.YOUCAM_API_KEY='synthetic';e.YOUCAM_STORAGE_HOST_SUFFIXES=suffixes;
  expect(await (await handle(request(),e)).json()).toMatchObject({error:{code:'live_unavailable',message:expect.stringContaining('allowlist')}});
+});
+
+it.each(['GET','DELETE'])('malformed URL escape returns 404 for %s', async method => {
+  const response = await handle(new Request('https://local/api/analyses/%ZZ', { method }), env());
+  expect(response.status).toBe(404);
+  expect(await response.json()).toMatchObject({ error: { code: 'not_found' } });
+});
+it.each([
+  { balance: 468, judgeUnits: 0, status: 429 },
+  { balance: 469, judgeUnits: 0, status: 202 },
+  { balance: 459, judgeUnits: 9, status: 429 },
+  { balance: 460, judgeUnits: 9, status: 202 },
+])('protects provider judge reserve at balance $balance with judge liability $judgeUnits', async ({ balance, judgeUnits, status }) => {
+  const e = env(); e.YOUCAM_MODE='live'; e.YOUCAM_API_KEY='synthetic';
+  if (judgeUnits) await e.DB.prepare("INSERT INTO reservations(id,pool,ip_hash,session_id,image_sha,day,units,status,created_at) VALUES('judge-held','judge','','','','',9,'abandoned',0)").bind().run();
+  const credit = vi.spyOn(LiveAdapter.prototype, 'creditBalance').mockResolvedValue(balance);
+  const submit = vi.spyOn(LiveAdapter.prototype, 'submit').mockResolvedValue({ providerTaskId:'synthetic' });
+  expect((await handle(request(),e)).status).toBe(status);
+  expect(credit).toHaveBeenCalledOnce();
+  expect(submit).toHaveBeenCalledTimes(status===202 ? 1 : 0);
+  expect((await e.DB.prepare("SELECT COUNT(*) count FROM jobs").bind().all()).results).toEqual([{ count: status===202 ? 1 : 0 }]);
+});
+it('rejects unavailable provider credit before reservation but judges use their own allowance', async () => {
+  const e=env(); e.YOUCAM_MODE='live'; e.YOUCAM_API_KEY='synthetic'; e.JUDGE_CODE='synthetic-judge';
+  const credit=vi.spyOn(LiveAdapter.prototype,'creditBalance').mockRejectedValue(new Error('offline'));
+  vi.spyOn(LiveAdapter.prototype,'submit').mockResolvedValue({ providerTaskId:'synthetic' });
+  expect((await handle(request(),e)).status).toBe(500);
+  expect((await e.DB.prepare('SELECT COUNT(*) count FROM jobs').bind().all()).results).toEqual([{count:0}]);
+  credit.mockClear();
+  expect((await handle(request({judgeCode:e.JUDGE_CODE}),e)).status).toBe(202);
+  expect(credit).not.toHaveBeenCalled();
+  expect((await e.DB.prepare("SELECT pool FROM reservations WHERE status='reserved'").bind().all()).results).toEqual([{pool:'judge'}]);
+});
+it.each([true,false])('a pre-task upload failure fileCreated=%s releases units and reports truthful cleanup', async fileCreated => {
+  const { ServiceError } = await import('../../service/adapters');
+  const e=env(); e.YOUCAM_MODE='live'; e.YOUCAM_API_KEY='synthetic';
+  vi.spyOn(LiveAdapter.prototype,'submit').mockRejectedValue(new ServiceError('provider_error','Synthetic upload failure',502,true,fileCreated));
+  const created:any=await (await handle(request(),e)).json();
+  const deleted=await handle(new Request('https://local/api/analyses/'+created.job.id,{method:'DELETE'}),e);
+  expect(await deleted.json()).toEqual({local:'deleted',provider:fileCreated?'unknown_task':'not_applicable'});
+  expect((await e.DB.prepare('SELECT status,image_sha FROM reservations WHERE id=?').bind(created.job.id).all()).results).toEqual([{status:'released',image_sha:''}]);
+});
+it.each(['succeeded','failed','running','throw'] as const)('DELETE settles a nonterminal provider outcome %s', async state => {
+  const e=env(); e.YOUCAM_MODE='live'; e.YOUCAM_API_KEY='synthetic';
+  vi.spyOn(LiveAdapter.prototype,'submit').mockResolvedValue({providerTaskId:'synthetic'});
+  const poll=vi.spyOn(LiveAdapter.prototype,'poll');
+  if(state==='throw') poll.mockRejectedValue(new Error('offline'));
+  else if(state==='succeeded') poll.mockResolvedValue({state,observations:[],zoneLabels:[],masks:{}});
+  else if(state==='failed') poll.mockResolvedValue({state,code:'error_no_face',message:'Synthetic'});
+  else poll.mockResolvedValue({state});
+  const remove=vi.spyOn(LiveAdapter.prototype,'deleteTask').mockResolvedValue(undefined);
+  const created:any=await (await handle(request(),e)).json();
+  expect((await handle(new Request('https://local/api/analyses/'+created.job.id,{method:'DELETE'}),e)).status).toBe(200);
+  expect(poll).toHaveBeenCalledOnce(); expect(remove).toHaveBeenCalledOnce();
+  expect((await e.DB.prepare('SELECT status FROM reservations WHERE id=?').bind(created.job.id).all()).results).toEqual([{status:state==='succeeded'?'spent':state==='failed'?'released':'abandoned'}]);
+});
+it('cron erases expired digests and previous UTC day identifiers in both ledgers and jobs',async()=>{
+  const e=env(), now=Date.now(), today=new Date(now).toISOString().slice(0,10), yesterday=new Date(now-86400000).toISOString().slice(0,10);
+  for(const table of ['reservations','mock_reservations']) {
+    for(const [id,day,created] of [['old',yesterday,now-86400000],['expired',today,now-1800001],['recent',today,now]] as const)
+      await e.DB.prepare(`INSERT INTO ${table}(id,pool,ip_hash,session_id,image_sha,day,units,status,created_at) VALUES(?,'public','ip','session','digest',?,9,'spent',?)`).bind(id,day,created).run();
+  }
+  for(const [id,day] of [['old',yesterday],['recent',today]]) await e.DB.prepare("INSERT INTO jobs(id,state,mode,created_at,updated_at,session_id,cleanup_status) VALUES(?,'failed','mock',?,?,'session','not_applicable')").bind(id,day+'T00:00:00.000Z',day+'T00:00:00.000Z').run();
+  await scheduled({},e);
+  for(const table of ['reservations','mock_reservations']) {
+    const rows=(await e.DB.prepare(`SELECT id,ip_hash,session_id,image_sha FROM ${table} WHERE id IN ('old','expired','recent') ORDER BY id`).bind().all()).results;
+    expect(rows).toEqual([{id:'expired',ip_hash:'ip',session_id:'session',image_sha:''},{id:'old',ip_hash:'',session_id:'',image_sha:''},{id:'recent',ip_hash:'ip',session_id:'session',image_sha:'digest'}]);
+  }
+  expect((await e.DB.prepare('SELECT id,session_id FROM jobs ORDER BY id').bind().all()).results).toEqual([{id:'old',session_id:''},{id:'recent',session_id:'session'}]);
+});
+it('cron selects live cleanup ahead of older mock backlog',async()=>{
+  const e=env(); e.YOUCAM_API_KEY='synthetic';
+  for(let i=0;i<8;i++) await e.DB.prepare("INSERT INTO jobs(id,state,mode,created_at,updated_at,session_id,provider_task_id,submit_started) VALUES(?,'running',?,'','','','synthetic',1)").bind(String(i),i<4?'mock':'live').run();
+  let calls=0;
+  await scheduled({},e,{},async()=>{calls++;return Response.json({data:{}});});
+  expect(calls).toBe(4);
+  expect((await e.DB.prepare("SELECT id FROM deleted_jobs ORDER BY id").bind().all()).results).toEqual(['4','5','6','7'].map(id=>({id})));
 });

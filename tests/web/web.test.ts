@@ -14,7 +14,7 @@ it('runs full mocked upload, derives regions, downloads numbers and deletes anal
     document.body.innerHTML = '<div id="app"></div>';
     const result: GetAnalysisResponse = { job: { id: 'mock-job', state: 'succeeded', mode: 'mock', source: 'mock', createdAt: 'now', updatedAt: 'now' }, observations: SAMPLE.observations.map(o => ({ ...o, source: 'mock' })), zoneLabels: SAMPLE.zoneLabels.map(z => ({ ...z, source: 'mock' })), masks: { ...run2Masks } };
     let cleanupAttempts = 0;
-    const fetcher = vi.fn().mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(init?.method === 'DELETE' ? Response.json({ local: 'deleted', provider: ++cleanupAttempts === 1 ? 'failed' : 'deleted' }) : Response.json(init?.method === 'POST' ? { job: result.job, deduplicated: false } : result)));
+    const fetcher = vi.fn().mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(init?.method === 'DELETE' ? Response.json({ local: 'deleted', provider: ++cleanupAttempts === 1 ? 'unknown_task' : cleanupAttempts === 2 ? 'failed' : 'deleted' }) : Response.json(init?.method === 'POST' ? { job: result.job, deduplicated: false } : result)));
     vi.stubGlobal('fetch', fetcher);
     vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 600, height: 800, close: vi.fn() }));
     const pixels = new Uint8ClampedArray(600 * 800 * 4);
@@ -62,10 +62,13 @@ it('runs full mocked upload, derives regions, downloads numbers and deletes anal
     expect(serializeLog(parsed)).toBeTruthy();
     click('delete');
     expect(fetcher).toHaveBeenLastCalledWith('/api/analyses/mock-job', { method: 'DELETE', keepalive: true });
-    await vi.waitFor(() => expect(document.getElementById('status')!.textContent).toContain('Deleted here. Perfect Corp. cleanup: failed'));
+    await vi.waitFor(() => expect(document.getElementById('status')!.textContent).toContain('The app cannot yet confirm Perfect Corp. cleanup.'));
     expect(document.getElementById('retry-delete')!.hidden).toBe(false);
     click('retry-delete');
-    await vi.waitFor(() => expect(document.getElementById('status')!.textContent).toContain('cleanup: deleted'));
+    await vi.waitFor(() => expect(document.getElementById('status')!.textContent).toContain('Deleted here. Perfect Corp. cleanup failed.'));
+    expect(document.getElementById('retry-delete')!.hidden).toBe(false);
+    click('retry-delete');
+    await vi.waitFor(() => expect(document.getElementById('status')!.textContent).toContain('Perfect Corp. confirmed deletion'));
     expect(document.getElementById('retry-delete')!.hidden).toBe(true);
     click('clear');
     expect(document.getElementById('results')!.textContent).toBe('');

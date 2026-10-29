@@ -12,6 +12,7 @@ export function database() {
   db.exec(readFileSync(new URL("../../service/migrations/0002.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../../service/migrations/0003.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../../service/migrations/0004.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../../service/migrations/0005.sql", import.meta.url), "utf8"));
   const sql: SqlExecutor = {
     async batch(statements) { db.transaction(() => { for (const s of statements) db.prepare(s.sql).run(...s.args); })(); },
     async all(sql, args = []) {

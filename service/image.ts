@@ -48,6 +48,51 @@ export function jpegDimensions(b: Uint8Array): {
   }
   throw invalid();
 }
+function stripJpegMetadata(bytes: Uint8Array): Uint8Array {
+  const invalid = () => new ServiceError("invalid_image", "Provide a valid JPEG within the SD image limits.");
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw invalid();
+  const segments: Uint8Array[] = [bytes.subarray(0, 2)];
+  let offset = 2;
+  while (offset < bytes.length) {
+    const start = offset;
+    if (bytes[offset++] !== 0xff) throw invalid();
+    while (bytes[offset] === 0xff) offset++;
+    const marker = bytes[offset++];
+    if (marker === 0xd9) {
+      segments.push(bytes.subarray(start, offset));
+      const clean = new Uint8Array(segments.reduce((size, segment) => size + segment.length, 0));
+      let position = 0;
+      for (const segment of segments) { clean.set(segment, position); position += segment.length; }
+      return clean;
+    }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      segments.push(bytes.subarray(start, offset));
+      continue;
+    }
+    if (offset + 2 > bytes.length) throw invalid();
+    const length = (bytes[offset] << 8) | bytes[offset + 1];
+    if (length < 2 || offset + length > bytes.length) throw invalid();
+    offset += length;
+    if ((marker < 0xe1 || marker > 0xef) && marker !== 0xfe) {
+      segments.push(bytes.subarray(start, offset));
+    }
+    if (marker === 0xda) {
+      const scanStart = offset;
+      while (offset < bytes.length) {
+        if (bytes[offset] !== 0xff) { offset++; continue; }
+        let next = offset + 1;
+        while (bytes[next] === 0xff) next++;
+        if (bytes[next] === 0x00 || (bytes[next] >= 0xd0 && bytes[next] <= 0xd7)) {
+          offset = next + 1;
+          continue;
+        }
+        break;
+      }
+      segments.push(bytes.subarray(scanStart, offset));
+    }
+  }
+  throw invalid();
+}
 export async function normalizeImage(file: File): Promise<NormalizedImage> {
   if (
     file.type !== "image/jpeg" ||
@@ -55,7 +100,7 @@ export async function normalizeImage(file: File): Promise<NormalizedImage> {
     file.size === 0
   )
     throw new ServiceError("invalid_image", "Upload a JPEG of at most 5 MiB.");
-  const bytes = new Uint8Array(await file.arrayBuffer());
+  const bytes = stripJpegMetadata(new Uint8Array(await file.arrayBuffer()));
   return {
     bytes,
     contentType: "image/jpeg",

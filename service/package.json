@@ -11,16 +11,19 @@
     "checkpoint:breakout": "node scripts/checkpoint-breakout.mjs"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250101.0",
+    "@cloudflare/workers-types": "^5.20261028.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^22.0.0",
-    "better-sqlite3": "11.10.0",
+    "better-sqlite3": "^13.0.3",
     "esbuild": "^0.28.2",
     "jpeg-js": "^0.4.4",
     "jsdom": "^29.1.1",
-    "miniflare": "^4.20260426.0",
+    "miniflare": "^4.20260730.0",
+    "sharp": "^0.35.5",
     "typescript": "^5.6.3",
-    "vitest": "^4.1.12"
+    "undici": "^8.12.3",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.155.0"
   }
 }

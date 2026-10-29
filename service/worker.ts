@@ -33,7 +33,6 @@ const results = new Map<
   string,
   { expires: number; observations: Observation[]; zoneLabels: ZoneLabel[]; masks: MaskSet }
 >();
-const polls = new Map<string, Promise<Response>>();
 const json = (value: unknown, status = 200) =>
   Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 function fail(code: ApiError["error"]["code"], message: string, status = 400) {
@@ -82,6 +81,19 @@ function job(row: Row): AnalysisJob {
         }
       : {}),
   };
+}
+async function codeMatches(value: unknown, expected: string): Promise<boolean> {
+  if (typeof value !== "string") return false;
+  const encode = new TextEncoder();
+  const [a, b] = await Promise.all([value, expected].map(v => crypto.subtle.digest("SHA-256", encode.encode(v))));
+  const left = new Uint8Array(a), right = new Uint8Array(b);
+  let difference = 0;
+  for (let i = 0; i < left.length; i++) difference |= left[i] ^ right[i];
+  return difference === 0;
+}
+function decodeJobId(value: string): string {
+  try { return decodeURIComponent(value); }
+  catch { throw new ServiceError("not_found", "Route not found.", 404); }
 }
 export async function handle(request: Request, env: Env): Promise<Response> {
   for (const [id, result] of results)
@@ -198,11 +210,16 @@ export async function handle(request: Request, env: Env): Promise<Response> {
           503,
         );
       const pool: BudgetPool =
-        env.JUDGE_CODE && meta.judgeCode === env.JUDGE_CODE
+        env.JUDGE_CODE && await codeMatches(meta.judgeCode, env.JUDGE_CODE)
           ? "judge"
-          : env.DEV_CODE && meta.judgeCode === env.DEV_CODE
+          : env.DEV_CODE && await codeMatches(meta.judgeCode, env.DEV_CODE)
             ? "dev"
             : "public";
+      if (adapter instanceof LiveAdapter && pool !== "judge") {
+        const judgeSpentOrHeld = 450 - (await budget.status()).remainingByPool.judge;
+        if (await adapter.creditBalance() - 9 < 460 - judgeSpentOrHeld)
+          return fail("quota_exhausted", "Analysis allowance is unavailable. Try a labeled sample.", 429);
+      }
       const reservation = await budget.reserve({
         pool,
         ipHash: await sha256(
@@ -249,8 +266,8 @@ export async function handle(request: Request, env: Env): Promise<Response> {
         if (error instanceof ServiceError && error.safeToRelease) {
           await budget.release(id);
           await sql.run(
-            "UPDATE jobs SET cleanup_status='not_applicable',state='failed',error_code='provider_error',updated_at=? WHERE id=? AND cleanup_status!='deleted' AND provider_task_id IS NULL",
-            [new Date().toISOString(), id],
+            "UPDATE jobs SET cleanup_status=?,state='failed',error_code='provider_error',updated_at=? WHERE id=? AND cleanup_status!='deleted' AND provider_task_id IS NULL",
+            [error.fileCreated ? "unknown_task" : "not_applicable", new Date().toISOString(), id],
           );
         } else {
           // Ambiguous creation keeps unit liability but frees execution capacity.
@@ -274,16 +291,28 @@ export async function handle(request: Request, env: Env): Promise<Response> {
     const match = url.pathname.match(/^\/api\/analyses\/([^/]+)$/);
     const deleted = async (id: string) => (await sql.all("SELECT id FROM deleted_jobs WHERE id=?", [id])).length > 0;
     if (request.method === "DELETE" && match) {
-      const id = decodeURIComponent(match[1]);
+      const id = decodeJobId(match[1]);
       const row = (await sql.all<Row>("SELECT * FROM jobs WHERE id=?", [id]))[0];
       if (!row) return fail("not_found", "This session result does not exist.", 404);
       await sql.run("INSERT OR IGNORE INTO deleted_jobs(id) VALUES(?)", [id]);
       results.delete(id);
       await sql.run(`UPDATE ${row.mode === 'mock' ? 'mock_reservations' : 'reservations'} SET status='abandoned' WHERE id=? AND status='reserved'`, [id]);
-      return json({ local: "deleted", provider: await cleanup(row, env, sql) });
+      const table = row.mode === "mock" ? "mock_reservations" : "reservations";
+      await sql.run(`UPDATE ${table} SET image_sha='' WHERE id=?`, [id]);
+      if (row.provider_task_id && !["succeeded", "failed"].includes(row.state)) {
+        try {
+          const outcome = await createAdapter({ ...env, YOUCAM_MODE: row.mode }).poll(row.provider_task_id);
+          if (outcome.state === "succeeded" || outcome.state === "failed") {
+            await sql.run(`UPDATE ${table} SET status=? WHERE id=? AND status IN ('reserved','abandoned')`, [outcome.state === "succeeded" ? "spent" : "released", id]);
+            await sql.run("UPDATE jobs SET state=? WHERE id=?", [outcome.state, id]);
+          }
+        } catch { /* An uncertain provider outcome keeps its unit liability. */ }
+      }
+      const provider = await cleanup(row, env, sql);
+      return json({ local: "deleted", provider: provider === "unknown_task" && row.state === "queued" ? "pending" : provider });
     }
     if (request.method === "GET" && match) {
-      const id = decodeURIComponent(match[1]),
+      const id = decodeJobId(match[1]),
         row = (await sql.all<Row>("SELECT * FROM jobs WHERE id=?", [id]))[0];
       if (!row || await deleted(id) || Date.now() - Date.parse(row.created_at) >= 1800000)
         return fail(
@@ -303,7 +332,6 @@ export async function handle(request: Request, env: Env): Promise<Response> {
       }
       if (row.state === "failed" || !row.provider_task_id)
         return json({ job: job(row), observations: [], zoneLabels: [] });
-      if (polls.has(id)) return await polls.get(id)!;
       // Provider polls are spaced at least ten seconds, including across isolates.
       const claimed = await sql.run(
         "UPDATE jobs SET updated_at=? WHERE id=? AND updated_at=? AND updated_at<=?",
@@ -315,7 +343,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
         ],
       );
       if (!claimed) return json({ job: job(row), observations: [], zoneLabels: [] });
-      const pending = (async () => {
+      {
         try {
           const poll = await createAdapter(env).poll(row.provider_task_id!);
           if (poll.state === "succeeded") {
@@ -360,12 +388,6 @@ export async function handle(request: Request, env: Env): Promise<Response> {
           zoneLabels: results.get(id)?.zoneLabels ?? [],
           ...(results.has(id) ? { masks: results.get(id)!.masks } : {}),
         });
-      })();
-      polls.set(id, pending);
-      try {
-        return await pending;
-      } finally {
-        polls.delete(id);
       }
     }
     return fail("not_found", "Route not found.", 404);
@@ -398,11 +420,15 @@ export async function cleanup(row: Row, env: Env, sql: D1Executor, fetcher: type
 }
 export async function scheduled(_event: unknown, env: Env, _ctx?: unknown, fetcher: typeof fetch = fetch.bind(globalThis)) {
   const sql = new D1Executor(env.DB);
+  const now = Date.now(), today = new Date(now).toISOString().slice(0, 10);
+  for (const table of ["reservations", "mock_reservations"])
+    await sql.run(`UPDATE ${table} SET image_sha=CASE WHEN created_at<=? OR id IN (SELECT id FROM deleted_jobs) THEN '' ELSE image_sha END, ip_hash=CASE WHEN day<? THEN '' ELSE ip_hash END, session_id=CASE WHEN day<? THEN '' ELSE session_id END WHERE created_at<=? OR day<? OR id IN (SELECT id FROM deleted_jobs)`, [now-1800000, today, today, now-1800000, today]);
+  await sql.run("UPDATE jobs SET session_id='' WHERE substr(created_at,1,10)<?", [today]);
   // Uncertain units remain held; only execution slots are reclaimed.
   for (const table of ['reservations', 'mock_reservations'])
     await sql.run(`UPDATE ${table} SET status='abandoned' WHERE status='reserved' AND created_at<=? AND NOT EXISTS(SELECT 1 FROM jobs WHERE jobs.id=${table}.id)`, [Date.now()-1800000]);
   const rows = await sql.all<Row>(`SELECT * FROM jobs WHERE (created_at<=? OR id IN (SELECT id FROM deleted_jobs))
-    AND cleanup_status NOT IN ('deleted','not_applicable') AND (cleanup_status!='unknown_task' OR provider_task_id IS NOT NULL) ORDER BY cleanup_last_attempt_at,created_at LIMIT 4`, [new Date(Date.now()-1800000).toISOString()]);
+    AND cleanup_status NOT IN ('deleted','not_applicable') AND (cleanup_status!='unknown_task' OR provider_task_id IS NOT NULL) ORDER BY mode='live' DESC,cleanup_last_attempt_at,created_at LIMIT 4`, [new Date(Date.now()-1800000).toISOString()]);
   for (const row of rows) {
     const table = row.mode === 'mock' ? 'mock_reservations' : 'reservations';
     await sql.batch([
