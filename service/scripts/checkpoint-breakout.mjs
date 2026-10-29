@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 import sharp from 'sharp';
 import { JSDOM } from 'jsdom';
 
-const defaultDir = '/workspace/eng/spikes/youcam-breakout-20261025/live-smoke';
+const defaultDir = 'fixtures';
 async function main() {
   const mock = process.env.MOCK === "1";
   const source = mock ? "mock" : "live";
@@ -13,7 +13,7 @@ async function main() {
     bundle: true, write: false, platform: 'node', format: 'esm',
   });
   const { MockAdapter, deriveRegions, buildLog, renderResults, serializeLog } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
-  const input = mock ? await new MockAdapter().poll("mock:success") : JSON.parse(await readFile(resolve(process.env.IN ?? `${defaultDir}/result.json`), 'utf8'));
+  const input = mock ? await new MockAdapter().poll("mock:success") : JSON.parse(await readFile(resolve(process.env.IN ?? `${defaultDir}/run2-normalized.json`), 'utf8'));
   const check = (name, condition) => { console.log(`${condition ? 'PASS' : 'FAIL'} ${name}`); if (!condition) throw Error(name); };
   check(`${source} acne/redness/texture observations`, ['acne', 'redness', 'texture'].every(c => input.observations?.some(o => o.concern === c && o.source === source && Number.isFinite(o.rawScore))));
   check('zoneLabels >= 1', Array.isArray(input.zoneLabels) && input.zoneLabels.length >= 1);

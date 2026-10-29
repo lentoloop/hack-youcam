@@ -1,40 +1,40 @@
-# Breakout Log (working title)
+# Breakout Log
 
-A phone-first cosmetic appearance log: record recent product changes, self-reported areas and discomfort, YouCam observations, and what is still unknown. It cannot identify which product caused a change and provides no diagnosis, stop order, or improvement percentages.
+A phone-first cosmetic appearance log. Record recent product changes, self-reported areas and discomfort, YouCam observations, and what remains unknown. Breakout Log does not diagnose a condition, identify which product caused a change, recommend stopping a product, or report improvement percentages.
 
-The strict TypeScript Vite frontend uses vanilla DOM APIs. Logs stay in memory until cleared, page exit, or the 30-minute session limit. Download/import JSON lets users keep a record on their own device. Files contain observations, labels, self-report text and derived numbers; no photos, masks, provider URLs or task IDs. Start dates must be valid before downloading.
+The TypeScript frontend uses Vite and vanilla DOM APIs. The service runs on Cloudflare Workers with D1. Sample uses pre-analyzed observations from a synthetic AI face. Mock uses synthetic fixtures and never contacts the provider.
 
-With existing dependencies, run `cd web && npm run dev`; the `/api` proxy expects the local service on port 8787. Run `npm run dev` in service for its mock worker. Sample is explicitly labeled and uses run2 pre-analyzed observations without uploading or making an API call. Mock is test data; neither is a live baseline.
+## Run locally
 
-Verification:
+Use Node.js 22.13 or newer and npm. Install dependencies in each package:
 
 ```sh
-./service/node_modules/.bin/tsc -p tsconfig.contracts.json
+npm ci
+(cd service && npm ci)
+(cd web && npm ci)
+```
+
+Run `npm run dev` in `service/` and `web/` in separate terminals. Open the Vite URL. Its development proxy forwards `/api` to the local service on port 8787. Local service startup creates ephemeral D1, applies all five migrations, and blocks outbound provider requests.
+
+## Verify offline
+
+```sh
+bash scripts/verify-release.sh
+```
+
+This runs contracts, service and web typechecks, service/shared tests, Miniflare/workerd end-to-end tests, web/shared tests, the web build, and fresh SQLite migration checks. It never submits a paid provider task.
+
+The offline checkpoint decodes bundled PNG masks and renders the web results card:
+
+```sh
 cd service
-./node_modules/.bin/tsc -p tsconfig.json
-npm test                         # 59 service + 5 shared tests
-npm test -- ../tests/shared       # shared suite alone
-npm run test:e2e                  # offline Miniflare integration
-cd ../web
-./node_modules/.bin/tsc -p tsconfig.json
-npm test                         # web and shared tests
-npm run build
+IN=fixtures/run2-normalized.json OUT_DIR=/tmp/breakout-checkpoint npm run checkpoint:breakout
 ```
 
-Tests cover strict log import, framing comparison refusals, the real run2 mask fixture, a mocked browser upload, numbers-only download and deletion. No live API call is required.
+## Privacy and deployment
 
-## Demo images
+Logs stay in browser memory until cleared, page exit, or the 30-minute session limit. Download/import JSON lets users keep observations, labels, self-report text and derived numbers on their own device. Exports contain no photos, masks, provider URLs or task IDs. Start dates must be valid before downloading.
 
-Demo images in `/workspace/eng/youcam-demo-face/` are AI-generated synthetic faces, not a real person. Created with Grok. No real-person photo was used. Keep C2PA provenance on published originals: browser upload re-encoding strips metadata, so publish only the unmodified originals. Open the demo with `?demo=synthetic` to show the on-screen disclosure. Sample scores also came from an AI-generated synthetic face.
+Demo faces and sample observations are AI-generated, not real-person photographs. Open `?demo=synthetic` to display the disclosure. Keep original image provenance when publishing demo materials.
 
-Perfect Corp. documents that task deletion removes its input files; anything not deleted expires after 30 days. Result links expire after 2 hours. See [privacy](docs/PRIVACY.md), [architecture](docs/ARCHITECTURE.md), and [demo script](docs/DEMO-SCRIPT.md). No deployment is performed here. Judge URL, access instructions, video and screenshots remain release deliverables. Live service and phone rehearsal require separate verification.
-
-Offline checkpoint (from `service/`):
-
-```sh
-IN=fixtures/run2-normalized.json OUT_DIR=/tmp/y3-checkpoint npm run checkpoint:breakout
-```
-
-This decodes run2 PNG masks, derives regions, builds an example log, and renders the actual web card in jsdom. Seven PASS checks validate live observations, labels, regions, export privacy, scores and explanatory text. Outputs are `log-view.json`, `log-file.json`, and `log-card.html`. With no overrides it reads `/workspace/eng/spikes/youcam-breakout-20261025/live-smoke/result.json` and writes to that directory.
-
-Kai alone runs `SMOKE_LIVE_CONFIRM=1 npm run smoke:breakout` from `service/`, with the key securely supplied through `YOUCAM_API_KEY`, after live authorization and checking the units ledger. Its guard enforces the two-run cap, exclusive lock, unresolved-run block and 460-unit reserve after a 9-unit task. It writes the normalized input consumed by `checkpoint:breakout`. See the [demo instructions](docs/DEMO-SCRIPT.md) for local mock startup and the live/checkpoint handoff.
+See [deployment](docs/DEPLOY.md), [privacy](docs/PRIVACY.md), and [architecture](docs/ARCHITECTURE.md). Deployment starts in mock mode. Live uploads require separate authorization and consume provider units.
