@@ -99,10 +99,10 @@ export async function handle(request: Request, env: Env): Promise<Response> {
   for (const [id, result] of results)
     if (result.expires <= Date.now()) results.delete(id);
   try {
-    const url = new URL(request.url),
-      sql = new D1Executor(env.DB),
-      budget = new D1BudgetGuard(
-        env.YOUCAM_MODE === "mock"
+    const url = new URL(request.url);
+    const sql = new D1Executor(env.DB);
+    const budgetFor = (mode: AnalysisJob["mode"]) => new D1BudgetGuard(
+        mode === "mock"
           ? {
               all: (query, args) =>
                 sql.all(
@@ -117,8 +117,9 @@ export async function handle(request: Request, env: Env): Promise<Response> {
                 ),
             }
           : sql,
-        () => Date.now(), env.YOUCAM_MODE === "mock" ? "mock" : "live",
+        () => Date.now(), mode === "mock" ? "mock" : "live",
       );
+    const budget = budgetFor(env.YOUCAM_MODE === "mock" ? "mock" : "live");
     if (request.method === "POST" && url.pathname === "/api/analyses") {
       const length = Number(request.headers.get("content-length"));
       if (length > IMAGE_LIMITS.maxBytes + 65536)
@@ -298,7 +299,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
       await sql.run(`UPDATE ${table} SET image_sha='' WHERE id=?`, [id]);
       if (row.provider_task_id && !["succeeded", "failed"].includes(row.state)) {
         try {
-          const outcome = await createAdapter({ ...env, YOUCAM_MODE: row.mode }).poll(row.provider_task_id);
+          const outcome = await createAdapter({ ...env, YOUCAM_MODE: row.mode }).poll(row.provider_task_id, { includeMasks: false });
           if (outcome.state === "succeeded" || outcome.state === "failed") {
             await sql.run(`UPDATE ${table} SET status=? WHERE id=? AND status IN ('reserved','abandoned')`, [outcome.state === "succeeded" ? "spent" : "released", id]);
             await sql.run("UPDATE jobs SET state=? WHERE id=?", [outcome.state, id]);
@@ -342,7 +343,8 @@ export async function handle(request: Request, env: Env): Promise<Response> {
       if (!claimed) return json({ job: job(row), observations: [], zoneLabels: [] });
       {
         try {
-          const poll = await createAdapter(env).poll(row.provider_task_id!);
+          const poll = await createAdapter({ ...env, YOUCAM_MODE: row.mode }).poll(row.provider_task_id!);
+          const budget = budgetFor(row.mode);
           if (poll.state === "succeeded") {
             await budget.commit(id);
             if (!await deleted(id)) results.set(id, {

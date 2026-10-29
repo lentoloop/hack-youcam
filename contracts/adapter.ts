@@ -26,7 +26,7 @@ export interface SkinAnalysisAdapter {
   readonly mode: YoucamMode;
   /** Upload + create task. Returns provider task id. Must not log image bytes or URLs. */
   submit(image: NormalizedImage): Promise<{ providerTaskId: string }>;
-  poll(providerTaskId: string): Promise<ProviderPoll>;
+  poll(providerTaskId: string, options?: { includeMasks: boolean }): Promise<ProviderPoll>;
 }
 
 export interface AdapterEnv {

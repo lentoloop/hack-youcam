@@ -222,7 +222,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
       return "data:image/png;base64," + btoa(binary);
     } catch { return; } // Masks are optional; never expose provider URLs or errors.
   }
-  async poll(id: string): Promise<ProviderPoll> {
+  async poll(id: string, options = { includeMasks: true }): Promise<ProviderPoll> {
     const data = await this.api(
       `/s2s/v2.0/task/skin-analysis/${encodeURIComponent(id)}`,
     );
@@ -266,7 +266,7 @@ export class LiveAdapter implements SkinAnalysisAdapter {
         ["whole", "t_zone", "u_zone"].includes(r.region) && typeof r.skin_type === "string")
       .map((r: any) => ({ region: r.region, label: r.skin_type, source: "live" }));
     const masks: MaskSet = {};
-    await Promise.all((["acne", "redness", "t_zone", "u_zone"] as MaskKind[]).map(async key => {
+    if (options.includeMasks) await Promise.all((["acne", "redness", "t_zone", "u_zone"] as MaskKind[]).map(async key => {
       const row = data.results.output.find((r: any) =>
         key === "acne" || key === "redness" ? r.type === key :
           r.type === "skin_type" && r.region === key);

@@ -8,7 +8,7 @@ import {
   beforeEach,
 } from "../../service/node_modules/vitest";
 import { D1Executor } from "../../service/budget";
-import { LiveAdapter } from "../../service/adapters";
+import { LiveAdapter, MockAdapter } from "../../service/adapters";
 import { handle, scheduled, type Env } from "../../service/worker";
 import { CONSENT_TEXT_VERSION } from "../../contracts";
 import { database, jpeg } from "./helpers";
@@ -451,7 +451,7 @@ it.each(['succeeded','failed','running','throw'] as const)('DELETE settles a non
   const remove=vi.spyOn(LiveAdapter.prototype,'deleteTask').mockResolvedValue(undefined);
   const created:any=await (await handle(request(),e)).json();
   expect((await handle(new Request('https://local/api/analyses/'+created.job.id,{method:'DELETE'}),e)).status).toBe(200);
-  expect(poll).toHaveBeenCalledOnce(); expect(remove).toHaveBeenCalledOnce();
+  expect(poll).toHaveBeenCalledExactlyOnceWith('synthetic', { includeMasks: false }); expect(remove).toHaveBeenCalledOnce();
   expect((await e.DB.prepare('SELECT status FROM reservations WHERE id=?').bind(created.job.id).all()).results).toEqual([{status:state==='succeeded'?'spent':state==='failed'?'released':'abandoned'}]);
 });
 it('cron erases expired digests and previous UTC day identifiers in both ledgers and jobs',async()=>{
@@ -498,4 +498,26 @@ it('serializes concurrent requests against the same uncharged provider balance',
   const responses = await Promise.all(['parallel-session-0001', 'parallel-session-0002'].map(sessionId => handle(request({ sessionId }), e)));
   expect(responses.map(response => response.status).sort()).toEqual([202, 429]);
   expect(submit).toHaveBeenCalledOnce();
+});
+
+it.each(['live', 'mock'] as const)('GET uses stored %s mode after the environment switches', async mode => {
+  const e = env();
+  e.YOUCAM_MODE = mode === 'live' ? 'mock' : 'live';
+  e.YOUCAM_API_KEY = 'synthetic';
+  const id = 'mode-switch-' + mode;
+  const stamp = new Date(Date.now() - 15000).toISOString();
+  const table = mode === 'mock' ? 'mock_reservations' : 'reservations';
+  await e.DB.prepare("INSERT INTO jobs(id,state,mode,created_at,updated_at,session_id,provider_task_id) VALUES(?,'running',?,?,?,'session','synthetic-task')").bind(id, mode, stamp, stamp).run();
+  for (const ledger of ['reservations', 'mock_reservations'])
+    await e.DB.prepare(`INSERT INTO ${ledger}(id,pool,ip_hash,session_id,image_sha,day,units,created_at) VALUES(?,'public','','','','',9,?)`).bind(id, Date.now()).run();
+  const live = vi.spyOn(LiveAdapter.prototype, 'poll').mockResolvedValue({state:'succeeded', observations:[], zoneLabels:[], masks:{}});
+  const mock = vi.spyOn(MockAdapter.prototype, 'poll').mockResolvedValue({state:'failed', code:'error_no_face', message:'Synthetic'});
+  const response = await handle(new Request('https://local/api/analyses/' + id), e);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({job:{mode, state:mode === 'live' ? 'succeeded' : 'failed'}});
+  expect(mode === 'live' ? live : mock).toHaveBeenCalledExactlyOnceWith('synthetic-task');
+  expect(mode === 'live' ? mock : live).not.toHaveBeenCalled();
+  expect((await e.DB.prepare(`SELECT status FROM ${table} WHERE id=?`).bind(id).all()).results).toEqual([{status:mode === 'live' ? 'spent' : 'released'}]);
+  const other = mode === 'mock' ? 'reservations' : 'mock_reservations';
+  expect((await e.DB.prepare(`SELECT status FROM ${other} WHERE id=?`).bind(id).all()).results).toEqual([{status:'reserved'}]);
 });

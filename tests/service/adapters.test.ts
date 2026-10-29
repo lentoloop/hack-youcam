@@ -171,6 +171,7 @@ it("deletes a provider task", async () => {
   expect(JSON.parse(calls[0].init.body)).toEqual({ task_id: "t" });
 });
 
+import creditResponse from "../../service/fixtures/live-credit-response.json";
 import run2 from "../../service/fixtures/live-sample-result.json";
 import { run2Masks } from "../../service/fixtures/run2-masks";
 const pngs: Record<string, string> = { URL_4: run2Masks.acne!, URL_3: run2Masks.redness!, URL_6: run2Masks.t_zone!, URL_7: run2Masks.u_zone! };
@@ -331,7 +332,7 @@ it.each([
   expect(await adapter.creditBalance()).toBe(986);
   expect(calls).toBe(1);
 });
-it.each([null, {}, {results:[]}, {results:[null]}, {results:[{amount_dec:''}]}, {results:[{amount_dec:null}]}, {results:[{amount_dec:-1}]}, {results:[{amount_dec:'NaN'}]}])('fails closed for malformed credit %j', async body => {
+it.each([null, {}, { balance: 130 }, { results: [{ amount: 130 }] }, {results:[]}, {results:[null]}, {results:[{amount_dec:''}]}, {results:[{amount_dec:null}]}, {results:[{amount_dec:-1}]}, {results:[{amount_dec:'NaN'}]}])('fails closed for malformed credit %j', async body => {
   const adapter=new LiveAdapter('synthetic',async()=>Response.json(body));
   await expect(adapter.creditBalance()).rejects.toMatchObject({code:'live_unavailable',status:503});
 });
@@ -347,4 +348,22 @@ it('tracks an allocated provider file even when its upload response is lost',asy
     throw Error('Synthetic upload connection failure');
   },'storage.example.com');
   await expect(adapter.submit(image)).rejects.toMatchObject({safeToRelease:true,fileCreated:true});
+});
+
+it("checks a successful task for deletion without downloading masks", async () => {
+  const calls: string[] = [];
+  const adapter = new LiveAdapter("synthetic", async url => {
+    calls.push(String(url));
+    return Response.json(sample());
+  });
+  const result = await adapter.poll("deleting-task", { includeMasks: false });
+  expect(result).toMatchObject({ state: "succeeded", masks: {} });
+  expect(calls).toEqual(["https://yce-api-01.makeupar.com/s2s/v2.0/task/skin-analysis/deleting-task"]);
+});
+it("sums both amount_dec rows from the verified live credit response shape", async () => {
+  expect(creditResponse.results).toHaveLength(2);
+  expect(typeof creditResponse.results[0].amount_dec).toBe("number");
+  expect(typeof creditResponse.results[1].amount_dec).toBe("string");
+  const adapter = new LiveAdapter("synthetic", async () => Response.json(creditResponse));
+  expect(await adapter.creditBalance()).toBe(130);
 });

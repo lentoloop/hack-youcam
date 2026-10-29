@@ -1,0 +1,6 @@
+{
+  "results": [
+    { "amount_dec": 123.5 },
+    { "amount_dec": "6.5" }
+  ]
+}
