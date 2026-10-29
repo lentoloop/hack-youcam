@@ -14,7 +14,7 @@ it('runs full mocked upload, derives regions, downloads numbers and deletes anal
     document.body.innerHTML = '<div id="app"></div>';
     const result: GetAnalysisResponse = { job: { id: 'mock-job', state: 'succeeded', mode: 'mock', source: 'mock', createdAt: 'now', updatedAt: 'now' }, observations: SAMPLE.observations.map(o => ({ ...o, source: 'mock' })), zoneLabels: SAMPLE.zoneLabels.map(z => ({ ...z, source: 'mock' })), masks: { ...run2Masks } };
     let cleanupAttempts = 0;
-    const fetcher = vi.fn().mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(init?.method === 'DELETE' ? Response.json({ local: 'deleted', provider: ++cleanupAttempts === 1 ? 'unknown_task' : cleanupAttempts === 2 ? 'failed' : 'deleted' }) : Response.json(init?.method === 'POST' ? { job: result.job, deduplicated: false } : result)));
+    const fetcher = vi.fn().mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(init?.method === 'DELETE' ? Response.json({ local: 'deleted', provider: ++cleanupAttempts === 1 ? 'failed' : 'deleted' }) : Response.json(init?.method === 'POST' ? { job: result.job, deduplicated: false } : result)));
     vi.stubGlobal('fetch', fetcher);
     vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 600, height: 800, close: vi.fn() }));
     const pixels = new Uint8ClampedArray(600 * 800 * 4);
@@ -62,9 +62,6 @@ it('runs full mocked upload, derives regions, downloads numbers and deletes anal
     expect(serializeLog(parsed)).toBeTruthy();
     click('delete');
     expect(fetcher).toHaveBeenLastCalledWith('/api/analyses/mock-job', { method: 'DELETE', keepalive: true });
-    await vi.waitFor(() => expect(document.getElementById('status')!.textContent).toContain('The app cannot yet confirm Perfect Corp. cleanup.'));
-    expect(document.getElementById('retry-delete')!.hidden).toBe(false);
-    click('retry-delete');
     await vi.waitFor(() => expect(document.getElementById('status')!.textContent).toContain('Deleted here. Perfect Corp. cleanup failed.'));
     expect(document.getElementById('retry-delete')!.hidden).toBe(false);
     click('retry-delete');
@@ -158,4 +155,34 @@ it('labels the sample scores as coming from an AI-generated synthetic face', asy
     expect(document.body.textContent).toContain('Sample uses pre-analyzed run2 scores from an AI-generated synthetic face, not a real person. Created with Grok.');
     document.getElementById('sample')!.click();
     expect(document.getElementById('status')!.textContent).toContain('scores from an AI-generated synthetic face');
+});
+
+it('ends cleanup retries after a failed upload without a provider task and offers a new analysis', async () => {
+    vi.useFakeTimers(); vi.resetModules();
+    document.body.innerHTML = '<div id="app"></div>';
+    const job = { id: 'failed-upload', state: 'failed', mode: 'live', source: 'live', createdAt: 'now', updatedAt: 'now', error: { code: 'provider_error' } };
+    const fetcher = vi.fn().mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(Response.json(init?.method === 'DELETE' ? { local: 'deleted', provider: 'unknown_task' } : init?.method === 'POST' ? { job, deduplicated: false } : { job })));
+    vi.stubGlobal('fetch', fetcher);
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 600, height: 800, close: vi.fn() }));
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(cb => cb(new Blob(['jpeg'], { type: 'image/jpeg' })));
+    await import('../../web/src/main');
+    document.getElementById('agree')!.click(); document.getElementById('continue')!.click();
+    const input = document.getElementById('upload') as HTMLInputElement;
+    Object.defineProperty(input, 'files', { value: [new File(['x'], 'photo.jpg')] });
+    input.dispatchEvent(new Event('change')); document.getElementById('analyze')!.click();
+    await vi.advanceTimersByTimeAsync(10001);
+    document.getElementById('delete')!.click();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(document.getElementById('status')!.textContent).toContain('Cleanup cannot be retried');
+    expect(document.getElementById('status')!.textContent).toContain('expire after 30 days');
+    expect(document.getElementById('retry-delete')!.hidden).toBe(true);
+    expect(document.getElementById('resume')!.hidden).toBe(true);
+    expect(document.getElementById('start-analysis')!.hidden).toBe(false);
+    const requests = fetcher.mock.calls.length;
+    document.getElementById('start-analysis')!.click();
+    expect(document.getElementById('capture')!.hidden).toBe(false);
+    expect(document.activeElement).toBe(input);
+    document.getElementById('delete')!.click();
+    expect(fetcher).toHaveBeenCalledTimes(requests);
 });
