@@ -5,6 +5,78 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
+// Ignore literal text, but inspect code inside template substitutions. Unknown import
+// forms also fail closed, including computed dynamic imports and import.meta URLs.
+export function hasSplitModuleGraph(source, html = '') {
+  if (/<link\b[^>]*\brel\s*=\s*(?:"[^"]*\bmodulepreload\b[^"]*"|'[^']*\bmodulepreload\b[^']*'|modulepreload\b)/i.test(html)) return true;
+  let index = 0;
+  function scan(templateExpression = false) {
+    let depth = 0;
+    let exporting = false;
+    while (index < source.length) {
+      const char = source[index++];
+      if (char === '/' && source[index] === '/') {
+        while (index < source.length && !/[\r\n]/.test(source[index])) index++;
+      } else if (char === '/' && source[index] === '*') {
+        const end = source.indexOf('*/', index + 1);
+        if (end < 0) return true;
+        index = end + 2;
+      } else if (char === '/' && /(?:^|[=(:,[!&|?;]|=>|\b(?:return|throw|case|yield))\s*$/.test(source.slice(0, index - 1))) {
+        let inClass = false;
+        let closed = false;
+        while (index < source.length) {
+          const next = source[index++];
+          if (next === '\\') index++;
+          else if (next === '[') inClass = true;
+          else if (next === ']') inClass = false;
+          else if (next === '/' && !inClass) { closed = true; break; }
+          else if (next === '\n' || next === '\r') return true;
+        }
+        if (!closed) return true;
+      } else if (char === '"' || char === "'") {
+        let closed = false;
+        while (index < source.length) {
+          const next = source[index++];
+          if (next === '\\') index++;
+          else if (next === char) { closed = true; break; }
+        }
+        if (!closed) return true;
+      } else if (char === '`') {
+        let closed = false;
+        while (index < source.length) {
+          const next = source[index++];
+          if (next === '\\') index++;
+          else if (next === '`') { closed = true; break; }
+          else if (next === '$' && source[index] === '{') {
+            index++;
+            if (scan(true)) return true;
+          }
+        }
+        if (!closed) return true;
+      } else if (/[a-zA-Z_$\\]/.test(char)) {
+        const start = index - 1;
+        while (index < source.length && /[\w$\\]/.test(source[index])) index++;
+        const word = source.slice(start, index);
+        // Escaped identifiers and regex literals are deliberately conservative:
+        // this is a guard for a known bundle, not a general JavaScript parser.
+        if (word.includes('\\') || word === 'import') return true;
+        if (word === 'export') exporting = true;
+        if (exporting && word === 'from') return true;
+      } else if (char === ';') {
+        exporting = false;
+      } else if (char === '{') {
+        depth++;
+      } else if (char === '}') {
+        if (templateExpression && depth === 0) return false;
+        depth--;
+      }
+    }
+    return templateExpression;
+  }
+  return scan();
+}
+
+async function main() {
 // Capture a fetched release artifact with browser networking disabled. No CDP or dependencies.
 const base = new URL(process.env.BASE_URL || 'https://before-another-bottle.ktwu1997.workers.dev/');
 if (!['https:', 'http:'].includes(base.protocol) || base.username || base.password ||
@@ -89,6 +161,7 @@ function harness(shot) {
 try {
   await mkdir(output, { recursive: true });
   let html = (await fetchStatic(base)).toString('utf8');
+  if (hasSplitModuleGraph('', html)) throw new Error('Split module build detected; static mirror needs review.');
   const refs = [...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)];
   const assets = new Map();
   for (const match of refs) {
@@ -101,7 +174,7 @@ try {
     let bytes = await fetchStatic(asset.url);
     // Fail closed if a future build needs a module graph or additional resource fetches.
     const text = bytes.toString('utf8');
-    if (asset.url.pathname.endsWith('.js') && /\bimport\s*(?:\(|["']|[^;\n]*\bfrom\s*["'])|\bexport\s*[^;\n]*\bfrom\s*["']/.test(text)) {
+    if (asset.url.pathname.endsWith('.js') && hasSplitModuleGraph(text)) {
       throw new Error('Split module build detected; static mirror needs review.');
     }
     if (asset.url.pathname.endsWith('.css')) {
@@ -147,4 +220,9 @@ try {
   console.log(`Captured ${manifest.shots.length} PNGs from Sample-only release assets. Zero analysis requests permitted.`);
 } finally {
   await rm(scratch, { recursive: true, force: true });
+}
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await main();
 }
