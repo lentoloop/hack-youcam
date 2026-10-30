@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hasSplitModuleGraph } from './capture-screenshots.mjs';
+import { hasSplitModuleGraph, isMirrorRequest } from './capture-screenshots.mjs';
 
 // Minimal excerpts from the deployed bundle: HTML template text and DOM lookups.
 const releaseSnippet = '`<label>Import log<input id="import" type="file" accept="application/json,.json"></label>`;i("import").onchange=()=>{var n;const e=(n=i("import").files)==null?void 0:n[0];if(!e)return;};';
@@ -46,3 +46,20 @@ for (const html of [
 test('accepts single-bundle HTML', () => {
   assert.equal(hasSplitModuleGraph('', '<script type="module" src="/assets/index.js"></script><link rel="stylesheet" href="/assets/index.css">'), false);
 });
+
+for (const [url, allowed] of [
+  ['http://127.0.0.1:4321/index.html?demo=synthetic', true],
+  ['http://127.0.0.1:4321/asset-0.js', true],
+  ['http://127.0.0.1:4322/asset-0.js', false],
+  ['https://127.0.0.1:4321/asset-0.js', false],
+  ['https://example.test/api/analyze', false],
+  ['http://localhost:4321/index.html', false],
+  ['http://127.0.0.1.evil.test:4321/index.html', false],
+  ['file:///index.html', false],
+  ['data:text/html,hello', false],
+  ['not a URL', false],
+]) {
+  test(`mirror request guard: ${url}`, () => {
+    assert.equal(isMirrorRequest(url, 'http://127.0.0.1:4321'), allowed);
+  });
+}
