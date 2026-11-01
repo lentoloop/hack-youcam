@@ -521,3 +521,10 @@ it.each(['live', 'mock'] as const)('GET uses stored %s mode after the environmen
   const other = mode === 'mock' ? 'reservations' : 'mock_reservations';
   expect((await e.DB.prepare(`SELECT status FROM ${other} WHERE id=?`).bind(id).all()).results).toEqual([{status:'reserved'}]);
 });
+
+it.each(['mock', 'live'] as const)('exposes the deployed %s mode without caching', async mode => {
+  const response = await handle(new Request('https://local/api/mode'), { ...env(), YOUCAM_MODE: mode });
+  expect(response.status).toBe(200);
+  expect(response.headers.get('Cache-Control')).toBe('no-store');
+  expect(await response.json()).toEqual({ mode });
+});

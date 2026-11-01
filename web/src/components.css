@@ -108,7 +108,7 @@ footer { margin-top: var(--s10); padding-top: var(--s6); border-top: var(--borde
   border: 0;
   background: none;
 }
-:is(#results, .ingredient-notes) .source-badge {
+:is(#consent, #results, .ingredient-notes) .source-badge {
   background: var(--paper);
   color: var(--ink);
   border: var(--border);

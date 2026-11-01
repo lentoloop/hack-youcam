@@ -100,6 +100,8 @@ export async function handle(request: Request, env: Env): Promise<Response> {
     if (result.expires <= Date.now()) results.delete(id);
   try {
     const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/api/mode")
+      return json({ mode: env.YOUCAM_MODE });
     const sql = new D1Executor(env.DB);
     const budgetFor = (mode: AnalysisJob["mode"]) => new D1BudgetGuard(
         mode === "mock"

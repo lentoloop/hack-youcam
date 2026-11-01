@@ -70,7 +70,7 @@ it('runs full mocked upload, derives regions, downloads numbers and deletes anal
     click('clear');
     expect(document.getElementById('results')!.textContent).toBe('');
 });
-it('sample makes no request and expires at 30 minutes', async () => { vi.useFakeTimers(); vi.resetModules(); vi.stubGlobal('fetch', vi.fn()); document.body.innerHTML = '<div id="app"></div>'; await import('../../web/src/main'); (document.getElementById('sample') as HTMLButtonElement).click(); expect(document.getElementById('results')!.textContent).toContain('Sample (pre-analyzed)'); expect(fetch).not.toHaveBeenCalled(); await vi.advanceTimersByTimeAsync(30 * 60 * 1000); expect(document.getElementById('results')!.textContent).toBe(''); });
+it('sample makes no analysis request and expires at 30 minutes', async () => { vi.useFakeTimers(); vi.resetModules(); vi.stubGlobal('fetch', vi.fn()); document.body.innerHTML = '<div id="app"></div>'; await import('../../web/src/main'); (document.getElementById('sample') as HTMLButtonElement).click(); expect(document.getElementById('results')!.textContent).toContain('Sample (pre-analyzed)'); expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/mode'); await vi.advanceTimersByTimeAsync(30 * 60 * 1000); expect(document.getElementById('results')!.textContent).toBe(''); });
 it('poll deadline ignores a late result', async () => { vi.useFakeTimers(); let resolve!: (v: GetAnalysisResponse) => void; const done = vi.fn(), timeout = vi.fn(); pollJob(() => new Promise(r => { resolve = r; }), done, vi.fn(), timeout); await vi.advanceTimersByTimeAsync(120000); expect(timeout).toHaveBeenCalledOnce(); resolve({} as GetAnalysisResponse); await Promise.resolve(); expect(done).not.toHaveBeenCalled(); });
 
 it.each([
@@ -260,4 +260,17 @@ it('renders mapped zones, rounded values and dates while preserving exported dat
     expect(after).not.toContain('24 Oct 2026');
     expect(first.observations[0]!.rawScore).toBe(45.7384);
     expect(first.date).toBe('2026-10-24T08:35:00.000Z');
+});
+
+it.each(['mock', 'live'])('consent shows the existing source badge for %s mode', async mode => {
+    vi.resetModules();
+    document.body.innerHTML = '<div id="app"></div>';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ mode })));
+    await import('../../web/src/main');
+    await vi.waitFor(() => {
+        const badge = document.querySelector<HTMLElement>('#consent .source-badge')!;
+        expect(badge.hidden).toBe(false);
+        expect(badge.textContent).toBe(mode === 'mock' ? 'Mock (test data)' : 'Live');
+    });
+    expect(document.getElementById('consent')!.hidden).toBe(false);
 });
